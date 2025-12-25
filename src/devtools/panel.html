@@ -1,0 +1,98 @@
+<!-- devtools/panel.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    .event-list { 
+      font-family: monospace; 
+      max-height: 400px; 
+      overflow-y: auto;
+    }
+    .event { 
+      padding: 4px; 
+      border-bottom: 1px solid #ccc;
+    }
+    .event-type { 
+      font-weight: bold; 
+      color: #007acc;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <h3>Qwiklytics DevTools</h3>
+    <div id="event-list" class="event-list"></div>
+    <button id="clear">Clear</button>
+    <button id="export">Export</button>
+  </div>
+  
+  <script>
+    class DevToolsPanel {
+      constructor() {
+        this.setupConnection();
+        this.bindEvents();
+      }
+      
+      setupConnection() {
+        window.addEventListener('message', (event) => {
+          if (event.data.source === 'qwiklytics-devtools') {
+            this.handleMessage(event.data);
+          }
+        });
+        
+        // Отправляем handshake
+        window.postMessage({
+          source: 'qwiklytics-devtools-extension',
+          type: 'HANDSHAKE',
+        }, '*');
+      }
+      
+      handleMessage(data) {
+        switch (data.type) {
+          case 'INIT':
+            this.renderEvents(data.events);
+            break;
+          case 'EVENT':
+            this.addEvent(data.event);
+            break;
+        }
+      }
+      
+      renderEvents(events) {
+        const container = document.getElementById('event-list');
+        container.innerHTML = '';
+        events.forEach(event => this.addEvent(event));
+      }
+      
+      addEvent(event) {
+        const container = document.getElementById('event-list');
+        const div = document.createElement('div');
+        div.className = 'event';
+        div.innerHTML = `
+          <span class="event-type">${event.type}</span>
+          <span>${new Date(event.timestamp).toLocaleTimeString()}</span>
+          <pre>${JSON.stringify(event, null, 2)}</pre>
+        `;
+        container.appendChild(div);
+        container.scrollTop = container.scrollHeight;
+      }
+      
+      bindEvents() {
+        document.getElementById('clear').addEventListener('click', () => {
+          window.postMessage({
+            source: 'qwiklytics-devtools-extension',
+            type: 'DISPATCH',
+            payload: { type: 'CLEAR' },
+          }, '*');
+        });
+        
+        document.getElementById('export').addEventListener('click', () => {
+          // Экспорт событий
+        });
+      }
+    }
+    
+    new DevToolsPanel();
+  </script>
+</body>
+</html>

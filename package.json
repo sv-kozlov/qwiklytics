@@ -1,0 +1,66 @@
+{
+  "name": "qwiklytics",
+  "version": "0.1.0",
+  "description": "Redux-like state management for Qwik with built-in DevTools",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    },
+    "./devtools": {
+      "import": "./dist/devtools/index.js",
+      "require": "./dist/devtools/index.cjs",
+      "types": "./dist/devtools/index.d.ts"
+    },
+    "./plugins": {
+      "import": "./dist/plugins/index.js",
+      "require": "./dist/plugins/index.cjs",
+      "types": "./dist/plugins/index.d.ts"
+    },
+    "./hooks": {
+      "import": "./dist/qwik/hooks.js",
+      "require": "./dist/qwik/hooks.cjs",
+      "types": "./dist/qwik/hooks.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && rollup -c",
+    "dev": "tsc -w",
+    "test": "vitest",
+    "lint": "eslint src",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "qwik",
+    "state-management",
+    "redux",
+    "store",
+    "immer",
+    "devtools"
+  ],
+  "author": "Qwiklytics Team",
+  "license": "MIT",
+  "peerDependencies": {
+    "@builder.io/qwik": "^1.0.0",
+    "immer": "^10.0.0"
+  },
+  "devDependencies": {
+    "@builder.io/qwik": "^1.0.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "rollup": "^4.0.0",
+    "vitest": "^1.0.0",
+    "eslint": "^8.0.0"
+  },
+  "dependencies": {
+    "immer": "^10.0.0"
+  }
+}
