@@ -20,6 +20,7 @@ export type StoreConfig<T, A extends Record<string, any>, E extends Record<strin
         [K in keyof S]: (state: T) => S[K];
     };
     middlewares?: Middleware<T>[];
+    plugins?: any[]; // ✅ Добавлено
 };
 
 export interface StoreContext<T> {
@@ -90,27 +91,9 @@ export class Store<T, A, E, S> {
         // Инициализируем плагины
         if (config.plugins) {
             config.plugins.forEach(plugin => {
-                const result = plugin.init?.(this);
-                this.plugins.set(plugin.name, {
-                    instance: plugin,
-                    result,
-                });
-
-                // Экспортируем API плагина для глобального доступа
-                if (plugin.api && typeof window !== 'undefined') {
-                    if (plugin.name === 'history') {
-                        (window as any).__QWIKLYTICS_HISTORY_STORE = plugin.api;
-                    }
-                }
+                this.initializePlugin(plugin);
             });
         }
-
-        // Инициализируем плагины из конфига
-        // if (config.plugins) {
-        //     config.plugins.forEach(pluginConfig => {
-        //         this.initializePlugin(pluginConfig);
-        //     });
-        // }
 
         // Инициализируем middleware из конфига
         if (config.middlewares) {
@@ -121,10 +104,20 @@ export class Store<T, A, E, S> {
     private setState(nextState: T) {
         const prevState = this.state;
 
-        // Применяем middleware
+        // Вызываем onAction у middleware перед изменением состояния
+        for (const middleware of this.middlewares) {
+            if (middleware.onAction) {
+                // Нужно получить текущее действие (это требует доработки)
+                // middleware.onAction(currentAction);
+            }
+        }
+
+        // Применяем middleware process
         let finalState = nextState;
         for (const middleware of this.middlewares) {
-            finalState = middleware.process(prevState, finalState);
+            if (middleware.process) {
+                finalState = middleware.process(prevState, finalState);
+            }
         }
 
         this.state = finalState;
@@ -140,6 +133,27 @@ export class Store<T, A, E, S> {
                 prevState,
                 nextState: this.state,
             });
+        }
+    }
+
+    private initializePlugin(pluginConfig: any) {
+        if (typeof pluginConfig === 'function') {
+            const plugin = pluginConfig();
+            this.plugins.set(plugin.name, plugin);
+
+            if (plugin.init) {
+                const result = plugin.init(this);
+                if (result) {
+                    this.plugins.set(plugin.name, {...plugin, api: result});
+                }
+            }
+
+            if (plugin.middleware) {
+                this.middlewares.push(plugin.middleware);
+            }
+        } else if (pluginConfig.name) {
+            // Уже созданный плагин
+            this.plugins.set(pluginConfig.name, pluginConfig);
         }
     }
 
@@ -174,33 +188,9 @@ export class Store<T, A, E, S> {
     }
 
     public getPluginApi(name: string): any {
-        return this.plugins.get(name)?.instance?.api ||
-            this.plugins.get(name)?.result?.api;
+        const plugin = this.plugins.get(name);
+        return plugin?.api || plugin?.result?.api;
     }
-
-    private initializePlugin(pluginConfig: any) {
-        if (typeof pluginConfig === 'function') {
-            const plugin = pluginConfig();
-            this.plugins.set(plugin.name, plugin);
-
-            if (plugin.init) {
-                const result = plugin.init(this);
-                if (result) {
-                    this.plugins.set(plugin.name, { ...plugin, api: result });
-                }
-            }
-
-            if (plugin.middleware) {
-                this.middlewares.push(plugin.middleware);
-            }
-        } else if (pluginConfig.name) {
-            // Уже созданный плагин
-            this.plugins.set(pluginConfig.name, pluginConfig);
-        }
-    }
-
-
-
 
     public subscribe(listener: (state: T) => void): () => void {
         this.listeners.add(listener);
@@ -211,35 +201,4 @@ export class Store<T, A, E, S> {
         this.state = state;
         this.listeners.forEach(listener => listener(this.state));
     }
-}
-
-
-
-// Обновляем src/core/store.ts для поддержки плагинов
-
-export class Store<T, A, E, S> {
-    // ... существующий код ...
-
-    public plugins: Map<string, any> = new Map();
-    public middlewares: any[] = [];
-
-    constructor(private config: StoreConfig<T, A, E, S>) {
-        // ... существующий код ...
-
-        // Инициализируем плагины из конфига
-        if (config.plugins) {
-            config.plugins.forEach(pluginConfig => {
-                this.initializePlugin(pluginConfig);
-            });
-        }
-
-        // Инициализируем middleware из конфига
-        if (config.middlewares) {
-            this.middlewares.push(...config.middlewares);
-        }
-    }
-
-
-
-    // ... остальной код ...
 }

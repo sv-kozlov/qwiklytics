@@ -26,7 +26,6 @@ export function createPersistMiddleware<T>(
 ): Middleware<T> {
     // Загружаем начальное состояние
     const saved = storage.getItem(key);
-    const initialState = saved ? JSON.parse(saved) : null;
 
     return {
         process: (prevState, nextState) => {
