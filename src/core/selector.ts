@@ -1,3 +1,6 @@
+/**
+ * Селекторы с мемоизацией для оптимизации вычислений
+ */
 interface SelectorOptions<T> {
     memoize: boolean;
     maxSize?: number;
@@ -5,14 +8,21 @@ interface SelectorOptions<T> {
 }
 
 export interface Selector<T, R> {
+    /** Функция вычисления значения из состояния */
     (state: T): R;
 
+    /** Счетчик пересчетов для отладки */
     recomputations: number;
+    /** Сброс статистики и кэша */
     resetRecomputations: () => void;
 }
 
-export function createSelector<T, R>(
-    selectorFn: (state: T) => R,
+/**
+ * Создание селектора с опциональной мемоизацией
+ * @param selectorFn - функция вычисления значения
+ * @param options - настройки мемоизации
+ */
+export function createSelector<T, R>(    selectorFn: (state: T) => R,
     options: SelectorOptions<T> = {memoize: true, maxSize: 1}
 ): Selector<T, R> {
     let lastState: T | null = null;
@@ -55,6 +65,10 @@ export function createSelector<T, R>(
             recomputations++;
             lastState = state;
             lastResult = result;
+
+            // Обновляем свойство selector
+            selector.recomputations = recomputations;
+
             return result;
         }
 
@@ -63,10 +77,17 @@ export function createSelector<T, R>(
         recomputations++;
         lastState = state;
         lastResult = result;
+        // Обновляем свойство selector
+        selector.recomputations = recomputations;
         return result;
     } as Selector<T, R>;
 
-    selector.recomputations = recomputations;
+    // Инициализация свойств
+    Object.defineProperty(selector, 'recomputations', {
+        get: () => recomputations,
+        enumerable: true,
+    });
+
     selector.resetRecomputations = () => {
         recomputations = 0;
         cache.clear();

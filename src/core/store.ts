@@ -83,18 +83,17 @@ export class Store<T, A, E, S> {
 
             const action = createAction(
                 actionType,
-                (payload: any) => {
-                    // Вызываем onAction middleware перед изменением состояния
-                    this.notifyMiddlewareAction(actionType, payload);
-
+                (payload: any, store?: any) => {
                     // Применяем reducer через immer
                     const nextState = produce(this.state, (draft: Draft<T>) => {
-                        reducer(draft, payload);
+                        // Передаем draft и payload в reducer
+                        (reducer as any)(draft, payload);
                     });
 
                     // Обновляем состояние через middleware
                     this.setState(nextState);
-                }
+                },
+                this // Передаем store в action
             );
 
             this.actions.set(key, action);
@@ -111,12 +110,15 @@ export class Store<T, A, E, S> {
             const effect = createEffect(
                 `${this.config.name}/${key}`,
                 async (payload: any) => {
+                    // Создаем контекст для эффекта
                     const context: StoreContext<T> = {
                         getState: () => this.state,
                         dispatch: (action) => this.dispatch(action),
                         actions: Object.fromEntries(this.actions),
                     };
-                    return await effectFn(context, payload);
+
+                    // Выполняем эффект с контекстом
+                    return await (effectFn as any)(context, payload);
                 }
             );
 
@@ -132,7 +134,7 @@ export class Store<T, A, E, S> {
 
         Object.entries(this.config.selectors).forEach(([key, selectorFn]) => {
             const selector = createSelector(
-                selectorFn,
+                selectorFn as any,
                 {memoize: true, maxSize: 10}
             );
 
@@ -156,9 +158,11 @@ export class Store<T, A, E, S> {
      */
     private initializePlugin(pluginConfig: any) {
         if (typeof pluginConfig === 'function') {
+            // Плагин как фабричная функция
             const plugin = pluginConfig();
             this.plugins.set(plugin.name, plugin);
 
+            // Вызываем init если есть
             if (plugin.init) {
                 const result = plugin.init(this);
                 if (result) {
@@ -166,12 +170,26 @@ export class Store<T, A, E, S> {
                 }
             }
 
+            // Добавляем middleware плагина
             if (plugin.middleware) {
                 this.middlewares.push(plugin.middleware);
             }
         } else if (pluginConfig.name) {
             // Уже созданный плагин
             this.plugins.set(pluginConfig.name, pluginConfig);
+
+            // Вызываем init если есть
+            if (pluginConfig.init) {
+                const result = pluginConfig.init(this);
+                if (result) {
+                    this.plugins.set(pluginConfig.name, {...pluginConfig, api: result});
+                }
+            }
+
+            // Добавляем middleware плагина
+            if (pluginConfig.middleware) {
+                this.middlewares.push(pluginConfig.middleware);
+            }
         }
     }
 
@@ -251,7 +269,9 @@ export class Store<T, A, E, S> {
      */
     public getAction<K extends keyof A>(key: K): A[K] {
         const action = this.actions.get(key as string);
-        if (!action) throw new Error(`Action ${String(key)} not found`);
+        if (!action) {
+            throw new Error(`Action ${String(key)} not found in store ${this.name}`);
+        }
         return action.execute as A[K];
     }
 
@@ -260,7 +280,9 @@ export class Store<T, A, E, S> {
      */
     public getEffect<K extends keyof E>(key: K): E[K] {
         const effect = this.effects.get(key as string);
-        if (!effect) throw new Error(`Effect ${String(key)} not found`);
+        if (!effect) {
+            throw new Error(`Effect ${String(key)} not found in store ${this.name}`);
+        }
         return effect.execute as E[K];
     }
 
@@ -269,7 +291,9 @@ export class Store<T, A, E, S> {
      */
     public getSelector<K extends keyof S>(key: K): () => S[K] {
         const selector = this.selectors.get(key as string);
-        if (!selector) throw new Error(`Selector ${String(key)} not found`);
+        if (!selector) {
+            throw new Error(`Selector ${String(key)} not found in store ${this.name}`);
+        }
         return () => selector(this.state);
     }
 

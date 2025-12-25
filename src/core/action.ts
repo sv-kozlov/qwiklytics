@@ -7,16 +7,38 @@ export interface Action<P = any> {
     execute: (payload: P, store?: any) => void;
 }
 
+/**
+ * Создание действия для изменения состояния
+ * @param type - уникальный тип действия
+ * @param executor - функция выполнения действия
+ * @param store - опциональный store для middleware
+ */
 export function createAction<P = void>(
     type: string,
-    executor: (payload: P) => void
+    executor: (payload: P, store?: any) => void,
+    store?: any
 ): Action<P> {
     const action: Action<P> = {
         type,
         payload: undefined as P,
-        execute: (payload: P) => {
+        execute: (payload: P, currentStore?: any) => {
             action.payload = payload;
-            executor(payload);
+
+            // Определяем какой store использовать
+            const targetStore = currentStore || store;
+
+            // Вызываем onAction у middleware перед выполнением
+            if (targetStore?.middlewares) {
+                for (const middleware of targetStore.middlewares) {
+                    if (middleware.onAction) {
+                        middleware.onAction({type, payload});
+                    }
+                }
+            }
+
+            // Выполняем действие
+            executor(payload, targetStore);
+
             // DevTools интеграция
             if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
                 (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
