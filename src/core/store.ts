@@ -209,12 +209,10 @@ export class Store<T, A, E, S> {
         const prevState = this.state;
 
         // Применяем middleware process для трансформации состояния
-        let finalState = nextState;
-        for (const middleware of this._middlewares) {
-            if (middleware.process) {
-                finalState = middleware.process(prevState, finalState);
-            }
-        }
+        const finalState = this._middlewares.reduce(
+            (state, middleware) => middleware.process ? middleware.process(prevState, state) : state,
+            nextState
+        );
 
         this.state = finalState;
 
@@ -239,9 +237,10 @@ export class Store<T, A, E, S> {
         if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
             (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
                 type: 'STATE_CHANGED',
-                store: this.name,
+                storeName: this.name,
                 prevState,
                 nextState,
+                timestamp: Date.now(),
             });
         }
     }

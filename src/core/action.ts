@@ -29,13 +29,11 @@ export function createAction<P = void>(
 
             // Вызываем onAction у middleware перед выполнением действия
             if (targetStore?.middlewares) {
-                const middlewares = targetStore.middlewares;
-                for (let i = 0; i < middlewares.length; i++) {
-                    const middleware = middlewares[i];
+                targetStore.middlewares.forEach((middleware: any) => {
                     if (middleware.onAction) {
                         middleware.onAction({type, payload});
                     }
-                }
+                });
             }
 
             // Выполняем основное действие
@@ -45,7 +43,7 @@ export function createAction<P = void>(
             if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
                 (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
                     type: 'ACTION_DISPATCHED',
-                    action: type,
+                    actionType: type,
                     payload,
                     timestamp: Date.now(),
                 });
