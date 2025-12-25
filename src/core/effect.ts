@@ -1,12 +1,17 @@
+/**
+ * Effect - асинхронное действие с побочными эффектами
+ */
 export interface Effect<P = any, R = any> {
     type: string;
     execute: (payload: P) => Promise<R>;
     status: 'idle' | 'pending' | 'success' | 'error';
 }
 
-export function createEffect<P = void, R = any>(
-    type: string,
-    executor: (payload: P) => Promise<R>
+/**
+ * Создание эффекта с автоматическим отслеживанием статуса
+ */
+export function createEffect<P = void, R = any>(type: string,
+                                                executor: (payload: P) => Promise<R>
 ): Effect<P, R> {
     const effect: Effect<P, R> = {
         type,
@@ -14,7 +19,7 @@ export function createEffect<P = void, R = any>(
         execute: async (payload: P) => {
             effect.status = 'pending';
 
-            // DevTools
+            // DevTools интеграция - начало эффекта
             if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
                 (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
                     type: 'EFFECT_STARTED',
@@ -28,7 +33,7 @@ export function createEffect<P = void, R = any>(
                 const result = await executor(payload);
                 effect.status = 'success';
 
-                // DevTools
+                // DevTools интеграция - успешное завершение
                 if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
                     (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
                         type: 'EFFECT_COMPLETED',
@@ -42,7 +47,7 @@ export function createEffect<P = void, R = any>(
             } catch (error) {
                 effect.status = 'error';
 
-                // DevTools
+                // DevTools интеграция - ошибка выполнения
                 if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
                     (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
                         type: 'EFFECT_FAILED',
@@ -55,7 +60,7 @@ export function createEffect<P = void, R = any>(
 
                 throw error;
             } finally {
-                // Можно добавить финальные действия
+                //todo Можно добавить финальные действия
             }
         },
     };

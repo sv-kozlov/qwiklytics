@@ -3,32 +3,55 @@ import {Action, createAction} from './action';
 import {createEffect, Effect} from './effect';
 import {createSelector, Selector} from './selector';
 import {Middleware} from './middleware';
+import type {Plugin} from '../plugins';
 
-export type StoreConfig<T, A extends Record<string, any>, E extends Record<string, any>, S extends Record<string, any>> = {
+/**
+ * Конфигурация Store
+ */
+export type StoreConfig<
+    T,
+    A extends Record<string, any>,
+    E extends Record<string, any>,
+    S extends Record<string, any>
+> = {
+    /** Имя store для идентификации */
     name: string;
+    /** Начальное состояние */
     initialState: T;
+    /** Действия для изменения состояния */
     actions: {
         [K in keyof A]: (state: Draft<T>, payload: Parameters<A[K]>[1]) => void;
     };
+    /** Асинхронные эффекты */
     effects?: {
         [K in keyof E]: (
             context: StoreContext<T>,
             payload: Parameters<E[K]>[0]
         ) => Promise<any>;
     };
+    /** Селекторы для вычисляемых значений */
     selectors?: {
         [K in keyof S]: (state: T) => S[K];
     };
+    /** Middleware для перехвата изменений */
     middlewares?: Middleware<T>[];
-    plugins?: any[]; // ✅ Добавлено
+    /** Плагины для расширения функциональности */
+    plugins?: Plugin[];
 };
 
+/**
+ * Контекст для эффектов
+ */
 export interface StoreContext<T> {
     getState: () => T;
     dispatch: (action: Action) => void;
     actions: Record<string, Action>;
 }
 
+/**
+ * Основной класс Store
+ * Управляет состоянием, действиями, эффектами и селекторами
+ */
 export class Store<T, A, E, S> {
     private state: T;
     private listeners: Set<(state: T) => void> = new Set();
@@ -45,97 +68,92 @@ export class Store<T, A, E, S> {
         this.state = config.initialState;
         this.middlewares = config.middlewares || [];
 
-        // Регистрируем действия
-        Object.entries(config.actions).forEach(([key, reducer]) => {
+        this.initializeActions();
+        this.initializeEffects();
+        this.initializeSelectors();
+        this.initializePlugins();
+    }
+
+    /**
+     * Инициализация действий из конфигурации
+     */
+    private initializeActions() {
+        Object.entries(this.config.actions).forEach(([key, reducer]) => {
+            const actionType = `${this.config.name}/${key}`;
+
             const action = createAction(
-                `${config.name}/${key}`,
+                actionType,
                 (payload: any) => {
+                    // Вызываем onAction middleware перед изменением состояния
+                    this.notifyMiddlewareAction(actionType, payload);
+
+                    // Применяем reducer через immer
                     const nextState = produce(this.state, (draft: Draft<T>) => {
                         reducer(draft, payload);
                     });
+
+                    // Обновляем состояние через middleware
                     this.setState(nextState);
                 }
             );
+
             this.actions.set(key, action);
         });
-
-        // Регистрируем эффекты
-        if (config.effects) {
-            Object.entries(config.effects).forEach(([key, effectFn]) => {
-                const effect = createEffect(
-                    `${config.name}/${key}`,
-                    async (payload: any) => {
-                        const context: StoreContext<T> = {
-                            getState: () => this.state,
-                            dispatch: (action) => this.dispatch(action),
-                            actions: Object.fromEntries(this.actions),
-                        };
-                        return await effectFn(context, payload);
-                    }
-                );
-                this.effects.set(key, effect);
-            });
-        }
-
-        // Регистрируем селекторы
-        if (config.selectors) {
-            Object.entries(config.selectors).forEach(([key, selectorFn]) => {
-                const selector = createSelector(
-                    selectorFn,
-                    {memoize: true, maxSize: 10}
-                );
-                this.selectors.set(key, selector);
-            });
-        }
-
-        // Инициализируем плагины
-        if (config.plugins) {
-            config.plugins.forEach(plugin => {
-                this.initializePlugin(plugin);
-            });
-        }
-
-        // Инициализируем middleware из конфига
-        if (config.middlewares) {
-            this.middlewares.push(...config.middlewares);
-        }
     }
 
-    private setState(nextState: T) {
-        const prevState = this.state;
+    /**
+     * Инициализация эффектов из конфигурации
+     */
+    private initializeEffects() {
+        if (!this.config.effects) return;
 
-        // Вызываем onAction у middleware перед изменением состояния
-        for (const middleware of this.middlewares) {
-            if (middleware.onAction) {
-                // Нужно получить текущее действие (это требует доработки)
-                // middleware.onAction(currentAction);
-            }
-        }
+        Object.entries(this.config.effects).forEach(([key, effectFn]) => {
+            const effect = createEffect(
+                `${this.config.name}/${key}`,
+                async (payload: any) => {
+                    const context: StoreContext<T> = {
+                        getState: () => this.state,
+                        dispatch: (action) => this.dispatch(action),
+                        actions: Object.fromEntries(this.actions),
+                    };
+                    return await effectFn(context, payload);
+                }
+            );
 
-        // Применяем middleware process
-        let finalState = nextState;
-        for (const middleware of this.middlewares) {
-            if (middleware.process) {
-                finalState = middleware.process(prevState, finalState);
-            }
-        }
-
-        this.state = finalState;
-
-        // Уведомляем подписчиков
-        this.listeners.forEach(listener => listener(this.state));
-
-        // DevTools
-        if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
-            (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
-                type: 'STATE_CHANGED',
-                store: this.name,
-                prevState,
-                nextState: this.state,
-            });
-        }
+            this.effects.set(key, effect);
+        });
     }
 
+    /**
+     * Инициализация селекторов из конфигурации
+     */
+    private initializeSelectors() {
+        if (!this.config.selectors) return;
+
+        Object.entries(this.config.selectors).forEach(([key, selectorFn]) => {
+            const selector = createSelector(
+                selectorFn,
+                {memoize: true, maxSize: 10}
+            );
+
+            this.selectors.set(key, selector);
+        });
+    }
+
+    /**
+     * Инициализация плагинов из конфигурации
+     */
+    private initializePlugins() {
+        if (!this.config.plugins) return;
+
+        this.config.plugins.forEach(plugin => {
+            this.initializePlugin(plugin);
+        });
+    }
+
+    /**
+     * Инициализация одного плагина
+     */
     private initializePlugin(pluginConfig: any) {
         if (typeof pluginConfig === 'function') {
             const plugin = pluginConfig();
@@ -157,48 +175,155 @@ export class Store<T, A, E, S> {
         }
     }
 
+    /**
+     * Уведомление middleware о выполнении действия
+     */
+    private notifyMiddlewareAction(type: string, payload: any) {
+        const action = {type, payload};
+
+        for (const middleware of this.middlewares) {
+            if (middleware.onAction) {
+                middleware.onAction(action);
+            }
+        }
+    }
+
+    /**
+     * Обновление состояния с применением middleware
+     */
+    private setState(nextState: T) {
+        const prevState = this.state;
+
+        // Применяем middleware process для трансформации состояния
+        let finalState = nextState;
+        for (const middleware of this.middlewares) {
+            if (middleware.process) {
+                finalState = middleware.process(prevState, finalState);
+            }
+        }
+
+        this.state = finalState;
+
+        // Уведомляем подписчиков об изменении
+        this.notifyListeners();
+
+        // Отправляем событие в DevTools
+        this.notifyDevTools(prevState, finalState);
+    }
+
+    /**
+     * Уведомление подписчиков о изменении состояния
+     */
+    private notifyListeners() {
+        this.listeners.forEach(listener => listener(this.state));
+    }
+
+    /**
+     * Отправка событий в DevTools
+     */
+    private notifyDevTools(prevState: T, nextState: T) {
+        if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
+            (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
+                type: 'STATE_CHANGED',
+                store: this.name,
+                prevState,
+                nextState,
+            });
+        }
+    }
+
+    /**
+     * Получение текущего состояния
+     */
     public getState(): T {
         return this.state;
     }
 
+    /**
+     * Выполнение действия
+     */
     public dispatch(action: Action) {
         action.execute(action.payload);
     }
 
+    /**
+     * Получение функции действия по ключу
+     */
     public getAction<K extends keyof A>(key: K): A[K] {
         const action = this.actions.get(key as string);
         if (!action) throw new Error(`Action ${String(key)} not found`);
         return action.execute as A[K];
     }
 
+    /**
+     * Получение функции эффекта по ключу
+     */
     public getEffect<K extends keyof E>(key: K): E[K] {
         const effect = this.effects.get(key as string);
         if (!effect) throw new Error(`Effect ${String(key)} not found`);
         return effect.execute as E[K];
     }
 
+    /**
+     * Получение функции селектора по ключу
+     */
     public getSelector<K extends keyof S>(key: K): () => S[K] {
         const selector = this.selectors.get(key as string);
         if (!selector) throw new Error(`Selector ${String(key)} not found`);
         return () => selector(this.state);
     }
 
+    /**
+     * Получение инстанса плагина
+     */
     public getPlugin<K extends keyof any>(name: string): any {
         return this.plugins.get(name)?.instance;
     }
 
+    /**
+     * Получение API плагина
+     */
     public getPluginApi(name: string): any {
         const plugin = this.plugins.get(name);
         return plugin?.api || plugin?.result?.api;
     }
 
+    /**
+     * Подписка на изменения состояния
+     * @returns функция отписки
+     */
     public subscribe(listener: (state: T) => void): () => void {
         this.listeners.add(listener);
         return () => this.listeners.delete(listener);
     }
 
+    /**
+     * Гидратация состояния (например, при SSR)
+     */
     public hydrate(state: T) {
         this.state = state;
-        this.listeners.forEach(listener => listener(this.state));
+        this.notifyListeners();
+    }
+
+    /**
+     * Уничтожение store и очистка ресурсов
+     */
+    public destroy() {
+        // Очищаем listeners
+        this.listeners.clear();
+
+        // Вызываем destroy у плагинов
+        this.plugins.forEach((plugin) => {
+            if (plugin.instance?.destroy) {
+                plugin.instance.destroy(this);
+            }
+        });
+
+        // Очищаем коллекции
+        this.actions.clear();
+        this.effects.clear();
+        this.selectors.clear();
+        this.plugins.clear();
+        this.middlewares = [];
     }
 }

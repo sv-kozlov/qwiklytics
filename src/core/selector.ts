@@ -1,4 +1,4 @@
-interface SelectorOptions {
+interface SelectorOptions<T> {
     memoize: boolean;
     maxSize?: number;
     equalityFn?: (a: T, b: T) => boolean;
@@ -13,7 +13,7 @@ export interface Selector<T, R> {
 
 export function createSelector<T, R>(
     selectorFn: (state: T) => R,
-    options: SelectorOptions = {memoize: true, maxSize: 1}
+    options: SelectorOptions<T> = {memoize: true, maxSize: 1}
 ): Selector<T, R> {
     let lastState: T | null = null;
     let lastResult: R | null = null;
