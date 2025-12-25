@@ -25,11 +25,11 @@ export function createEffect<P = void, R = any>(
             effect.status = 'pending';
             effect.error = undefined;
 
-            // DevTools интеграция - начало эффекта
+            // DevTools интеграция - начало выполнения эффекта
             if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
                 (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
                     type: 'EFFECT_STARTED',
-                    effect: type,
+                    effectType: type,
                     payload,
                     timestamp: Date.now(),
                 });
@@ -39,11 +39,11 @@ export function createEffect<P = void, R = any>(
                 const result = await executor(payload);
                 effect.status = 'success';
 
-                // DevTools интеграция - успешное завершение
+                // DevTools интеграция - успешное завершение эффекта
                 if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
                     (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
                         type: 'EFFECT_COMPLETED',
-                        effect: type,
+                        effectType: type,
                         result,
                         timestamp: Date.now(),
                     });
@@ -54,11 +54,11 @@ export function createEffect<P = void, R = any>(
                 effect.status = 'error';
                 effect.error = error instanceof Error ? error : String(error);
 
-                // DevTools интеграция - ошибка выполнения
+                // DevTools интеграция - ошибка выполнения эффекта
                 if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
                     (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
                         type: 'EFFECT_FAILED',
-                        effect: type,
+                        effectType: type,
                         error: error instanceof Error ? error.message : String(error),
                         stack: error instanceof Error ? error.stack : undefined,
                         timestamp: Date.now(),
@@ -68,11 +68,10 @@ export function createEffect<P = void, R = any>(
                 throw error;
             } finally {
                 // Финальные действия после выполнения эффекта
-                // Можно добавить cleanup, логирование метрик и т.д.
                 if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
                     (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
                         type: 'EFFECT_FINALIZED',
-                        effect: type,
+                        effectType: type,
                         status: effect.status,
                         timestamp: Date.now(),
                     });

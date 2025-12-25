@@ -17,14 +17,14 @@ export interface Middleware<T> {
 export function createLoggerMiddleware<T>(storeName: string): Middleware<T> {
     return {
         process: (prevState, nextState) => {
-            console.group(`Store: ${storeName}`);
-            console.log('Previous state:', prevState);
-            console.log('Next state:', nextState);
+            console.group(`📦 Store: ${storeName}`);
+            console.log('⬅️  Previous state:', prevState);
+            console.log('➡️  Next state:', nextState);
             console.groupEnd();
             return nextState;
         },
         onAction: (action) => {
-            console.log(`Action: ${action.type}`, action.payload);
+            console.log(`🎬 Action: ${action.type}`, action.payload);
         },
     };
 }
@@ -37,7 +37,10 @@ export function createAnalyticsMiddleware<T>(
     track: (event: string, data: any) => void
 ): Middleware<T> {
     return {
-        process: (prevState, nextState) => nextState,
+        process: (prevState, nextState) => {
+            // Не модифицируем состояние, только отслеживаем
+            return nextState;
+        },
         onAction: (action) => {
             track('store_action', {
                 type: action.type,
@@ -60,7 +63,9 @@ export function createValidationMiddleware<T>(
             const result = validator(nextState);
 
             if (result === false || typeof result === 'string') {
-                console.error('State validation failed:', result);
+                const errorMessage = typeof result === 'string' ? result : 'Validation failed';
+                console.error('❌ State validation failed:', errorMessage);
+                console.log('🔄 Reverting to previous state');
                 return prevState; // Откатываем к предыдущему состоянию
             }
 
@@ -75,25 +80,24 @@ export function createValidationMiddleware<T>(
  */
 export function createThrottleMiddleware<T>(delay: number): Middleware<T> {
     let lastUpdate = 0;
-    let isThrottled = false;
+    let throttleCount = 0;
 
     return {
         process: (prevState, nextState) => {
             const now = Date.now();
 
-            // Если прошло достаточно времени - применяем сразу
+            // Если прошло достаточно времени - применяем обновление
             if (now - lastUpdate >= delay) {
                 lastUpdate = now;
-                isThrottled = false;
+                if (throttleCount > 0) {
+                    console.debug(`⏱️  Throttled ${throttleCount} updates (${delay}ms)`);
+                    throttleCount = 0;
+                }
                 return nextState;
             }
 
             // Иначе - игнорируем обновление (throttle)
-            if (!isThrottled) {
-                isThrottled = true;
-                console.debug(`State update throttled (${delay}ms)`);
-            }
-
+            throttleCount++;
             return prevState;
         },
     };
@@ -109,6 +113,7 @@ export function createThrottleMiddleware<T>(delay: number): Middleware<T> {
 export function createDebounceMiddleware<T>(delay: number): Middleware<T> {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let lastUpdate = 0;
+    let debounceCount = 0;
 
     return {
         process: (prevState, nextState) => {
@@ -117,11 +122,16 @@ export function createDebounceMiddleware<T>(delay: number): Middleware<T> {
             // Очищаем предыдущий таймер
             if (timeoutId !== null) {
                 clearTimeout(timeoutId);
+                debounceCount++;
             }
 
             // Если прошло достаточно времени с последнего обновления
             if (now - lastUpdate >= delay) {
                 lastUpdate = now;
+                if (debounceCount > 0) {
+                    console.debug(`⏳ Debounced ${debounceCount} updates (${delay}ms)`);
+                    debounceCount = 0;
+                }
                 return nextState;
             }
 
@@ -131,7 +141,7 @@ export function createDebounceMiddleware<T>(delay: number): Middleware<T> {
                 timeoutId = null;
             }, delay);
 
-            // Возвращаем предыдущее состояние (отложенное не применяется)
+            // Возвращаем предыдущее состояние (отложенное не применяется сразу)
             return prevState;
         },
     };
@@ -143,10 +153,13 @@ export function createDebounceMiddleware<T>(delay: number): Middleware<T> {
 export function createFreezeMiddleware<T>(): Middleware<T> {
     /**
      * Глубокое замораживание объекта
+     * @param obj - объект для замораживания
      */
     const deepFreeze = (obj: any): any => {
+        // Замораживаем сам объект
         Object.freeze(obj);
 
+        // Рекурсивно замораживаем все свойства
         Object.getOwnPropertyNames(obj).forEach(prop => {
             const value = obj[prop];
             if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -188,7 +201,7 @@ export function createDiffMiddleware<T>(storeName: string): Middleware<T> {
             });
 
             if (Object.keys(changes).length > 0) {
-                console.group(`Store Diff: ${storeName}`);
+                console.group(`🔍 Store Diff: ${storeName}`);
                 console.table(changes);
                 console.groupEnd();
             }
@@ -203,12 +216,18 @@ export function createDiffMiddleware<T>(storeName: string): Middleware<T> {
  * @param storeName - имя store для идентификации в логах
  */
 export function createPerformanceMiddleware<T>(storeName: string): Middleware<T> {
+    let currentActionType: string | null = null;
+
     return {
         onAction: (action) => {
-            console.time(`Action: ${action.type}`);
+            currentActionType = action.type;
+            console.time(`⚡ ${currentActionType}`);
         },
         process: (prevState, nextState) => {
-            console.timeEnd(`Action: (processing)`);
+            if (currentActionType) {
+                console.timeEnd(`⚡ ${currentActionType}`);
+                currentActionType = null;
+            }
             return nextState;
         },
     };

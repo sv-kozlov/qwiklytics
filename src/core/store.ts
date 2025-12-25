@@ -93,16 +93,16 @@ export class Store<T, A, E, S> {
             const action = createAction(
                 actionType,
                 (payload: any, store?: any) => {
-                    // Применяем reducer через immer
+                    // Применяем reducer через immer для иммутабельности
                     const nextState = produce(this.state, (draft: Draft<T>) => {
-                        // Передаем draft и payload в reducer
+                        // Вызываем reducer с draft и payload
                         (reducer as any)(draft, payload);
                     });
 
-                    // Обновляем состояние через middleware
+                    // Обновляем состояние через middleware pipeline
                     this.setState(nextState);
                 },
-                this // Передаем store в action
+                this // Передаем текущий store в action для доступа к middleware
             );
 
             this.actions.set(key, action);
@@ -126,7 +126,7 @@ export class Store<T, A, E, S> {
                         actions: Object.fromEntries(this.actions),
                     };
 
-                    // Выполняем эффект с контекстом
+                    // Выполняем эффект с переданным контекстом
                     return await (effectFn as any)(context, payload);
                 }
             );
@@ -262,33 +262,36 @@ export class Store<T, A, E, S> {
 
     /**
      * Получение функции действия по ключу
+     * @throws {Error} если действие не найдено
      */
     public getAction<K extends keyof A>(key: K): A[K] {
         const action = this.actions.get(key as string);
         if (!action) {
-            throw new Error(`Action ${String(key)} not found in store ${this.name}`);
+            throw new Error(`[${this.name}] Action "${String(key)}" not found`);
         }
         return action.execute as A[K];
     }
 
     /**
      * Получение функции эффекта по ключу
+     * @throws {Error} если эффект не найден
      */
     public getEffect<K extends keyof E>(key: K): E[K] {
         const effect = this.effects.get(key as string);
         if (!effect) {
-            throw new Error(`Effect ${String(key)} not found in store ${this.name}`);
+            throw new Error(`[${this.name}] Effect "${String(key)}" not found`);
         }
         return effect.execute as E[K];
     }
 
     /**
      * Получение функции селектора по ключу
+     * @throws {Error} если селектор не найден
      */
     public getSelector<K extends keyof S>(key: K): () => S[K] {
         const selector = this.selectors.get(key as string);
         if (!selector) {
-            throw new Error(`Selector ${String(key)} not found in store ${this.name}`);
+            throw new Error(`[${this.name}] Selector "${String(key)}" not found`);
         }
         return () => selector(this.state);
     }

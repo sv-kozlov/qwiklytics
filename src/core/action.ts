@@ -24,23 +24,24 @@ export function createAction<P = void>(
         execute: (payload: P, currentStore?: any) => {
             action.payload = payload;
 
-            // Определяем какой store использовать
+            // Определяем какой store использовать (приоритет currentStore)
             const targetStore = currentStore || store;
 
-            // Вызываем onAction у middleware перед выполнением
-            // Защита от дублирования: middleware вызываются только если action вызван напрямую
-            if (targetStore?.middlewares && !currentStore) {
-                for (const middleware of targetStore.middlewares) {
+            // Вызываем onAction у middleware перед выполнением действия
+            if (targetStore?.middlewares) {
+                const middlewares = targetStore.middlewares;
+                for (let i = 0; i < middlewares.length; i++) {
+                    const middleware = middlewares[i];
                     if (middleware.onAction) {
                         middleware.onAction({type, payload});
                     }
                 }
             }
 
-            // Выполняем действие
+            // Выполняем основное действие
             executor(payload, targetStore);
 
-            // DevTools интеграция
+            // DevTools интеграция - отправка события
             if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
                 (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
                     type: 'ACTION_DISPATCHED',

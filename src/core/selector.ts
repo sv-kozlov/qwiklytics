@@ -58,35 +58,42 @@ export function createSelector<T, R>(
      * Основная функция селектора
      */
     const selector = function (state: T): R {
-        // Простая мемоизация с правильным сравнением
+        // Проверяем простую мемоизацию (последнее состояние)
         if (options.memoize && lastState !== null && equalityFn(lastState, state)) {
             return lastResult!;
         }
 
-        // LRU кэш для множественных состояний
+        // Проверяем LRU кэш если включен (maxSize > 1)
         if (options.memoize && options.maxSize && options.maxSize > 1) {
-            const key = JSON.stringify(state);
-            if (cache.has(key)) {
-                return cache.get(key)!;
+            try {
+                const key = JSON.stringify(state);
+                if (cache.has(key)) {
+                    return cache.get(key)!;
+                }
+
+                // Вычисляем новое значение
+                const result = selectorFn(state);
+                cache.set(key, result);
+
+                // Ограничиваем размер кэша (LRU - удаляем первый/старейший)
+                if (cache.size > options.maxSize) {
+                    const firstKey = cache.keys().next().value;
+                    cache.delete(firstKey);
+                }
+
+                // Обновляем последние значения и счетчик
+                incrementRecomputations();
+                lastState = state;
+                lastResult = result;
+
+                return result;
+            } catch (e) {
+                // Если JSON.stringify не сработал, падаем обратно на простую мемоизацию
+                console.warn('Selector cache serialization failed, using simple memoization');
             }
-
-            const result = selectorFn(state);
-            cache.set(key, result);
-
-            // Ограничиваем размер кэша (удаляем самый старый элемент)
-            if (cache.size > options.maxSize) {
-                const firstKey = cache.keys().next().value;
-                cache.delete(firstKey);
-            }
-
-            incrementRecomputations();
-            lastState = state;
-            lastResult = result;
-
-            return result;
         }
 
-        // Без мемоизации или простая мемоизация
+        // Простое вычисление (без кэша или если кэш не сработал)
         const result = selectorFn(state);
         incrementRecomputations();
         lastState = state;
