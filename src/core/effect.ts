@@ -47,12 +47,15 @@ export function createEffect<P = void, R = any>(
                     (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
                         type: 'EFFECT_FAILED',
                         effect: type,
-                        error,
+                        error: error instanceof Error ? error.message : String(error),
+                        stack: error instanceof Error ? error.stack : undefined,
                         timestamp: Date.now(),
                     });
                 }
 
                 throw error;
+            } finally {
+                // Можно добавить финальные действия
             }
         },
     };
