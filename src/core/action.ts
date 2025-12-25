@@ -28,7 +28,8 @@ export function createAction<P = void>(
             const targetStore = currentStore || store;
 
             // Вызываем onAction у middleware перед выполнением
-            if (targetStore?.middlewares) {
+            // Защита от дублирования: middleware вызываются только если action вызван напрямую
+            if (targetStore?.middlewares && !currentStore) {
                 for (const middleware of targetStore.middlewares) {
                     if (middleware.onAction) {
                         middleware.onAction({type, payload});

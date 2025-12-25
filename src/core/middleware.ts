@@ -70,35 +70,68 @@ export function createValidationMiddleware<T>(
 }
 
 /**
+ * Throttle middleware - ограничение частоты обновлений состояния
+ * @param delay - минимальная задержка в миллисекундах между обновлениями
+ */
+export function createThrottleMiddleware<T>(delay: number): Middleware<T> {
+    let lastUpdate = 0;
+    let isThrottled = false;
+
+    return {
+        process: (prevState, nextState) => {
+            const now = Date.now();
+
+            // Если прошло достаточно времени - применяем сразу
+            if (now - lastUpdate >= delay) {
+                lastUpdate = now;
+                isThrottled = false;
+                return nextState;
+            }
+
+            // Иначе - игнорируем обновление (throttle)
+            if (!isThrottled) {
+                isThrottled = true;
+                console.debug(`State update throttled (${delay}ms)`);
+            }
+
+            return prevState;
+        },
+    };
+}
+
+/**
  * Debounce middleware - отложенное применение изменений состояния
+ * Примечание: Данный middleware работает синхронно и не может
+ * откладывать обновления асинхронно в текущей архитектуре.
+ * Для полноценного debounce требуется асинхронная обработка в Store.
  * @param delay - задержка в миллисекундах перед применением
  */
 export function createDebounceMiddleware<T>(delay: number): Middleware<T> {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let pendingState: T | null = null;
-    let listeners: Array<(state: T) => void> = [];
+    let lastUpdate = 0;
 
     return {
         process: (prevState, nextState) => {
-            // Сохраняем отложенное состояние
-            pendingState = nextState;
+            const now = Date.now();
 
             // Очищаем предыдущий таймер
             if (timeoutId !== null) {
                 clearTimeout(timeoutId);
             }
 
-            // Устанавливаем новый таймер
+            // Если прошло достаточно времени с последнего обновления
+            if (now - lastUpdate >= delay) {
+                lastUpdate = now;
+                return nextState;
+            }
+
+            // Устанавливаем таймер для будущего обновления
             timeoutId = setTimeout(() => {
-                if (pendingState !== null) {
-                    // Применяем отложенное состояние
-                    listeners.forEach(listener => listener(pendingState!));
-                    pendingState = null;
-                }
+                lastUpdate = Date.now();
                 timeoutId = null;
             }, delay);
 
-            // Возвращаем предыдущее состояние (отложенное не применяется сразу)
+            // Возвращаем предыдущее состояние (отложенное не применяется)
             return prevState;
         },
     };
@@ -108,22 +141,24 @@ export function createDebounceMiddleware<T>(delay: number): Middleware<T> {
  * Freeze middleware - замораживание состояния для предотвращения мутаций
  */
 export function createFreezeMiddleware<T>(): Middleware<T> {
+    /**
+     * Глубокое замораживание объекта
+     */
+    const deepFreeze = (obj: any): any => {
+        Object.freeze(obj);
+
+        Object.getOwnPropertyNames(obj).forEach(prop => {
+            const value = obj[prop];
+            if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+                deepFreeze(value);
+            }
+        });
+
+        return obj;
+    };
+
     return {
         process: (prevState, nextState) => {
-            // Глубокое замораживание объекта
-            const deepFreeze = (obj: any): any => {
-                Object.freeze(obj);
-
-                Object.getOwnPropertyNames(obj).forEach(prop => {
-                    const value = obj[prop];
-                    if (value && typeof value === 'object' && !Object.isFrozen(value)) {
-                        deepFreeze(value);
-                    }
-                });
-
-                return obj;
-            };
-
             return deepFreeze(nextState);
         },
     };
@@ -148,16 +183,32 @@ export function createDiffMiddleware<T>(storeName: string): Middleware<T> {
                 const nextValue = (nextState as any)[key];
 
                 if (prevValue !== nextValue) {
-                    changes[key] = { from: prevValue, to: nextValue };
+                    changes[key] = {from: prevValue, to: nextValue};
                 }
             });
 
             if (Object.keys(changes).length > 0) {
                 console.group(`Store Diff: ${storeName}`);
-                console.log('Changes:', changes);
+                console.table(changes);
                 console.groupEnd();
             }
 
+            return nextState;
+        },
+    };
+}
+
+/**
+ * Performance middleware - измерение производительности обновлений
+ * @param storeName - имя store для идентификации в логах
+ */
+export function createPerformanceMiddleware<T>(storeName: string): Middleware<T> {
+    return {
+        onAction: (action) => {
+            console.time(`Action: ${action.type}`);
+        },
+        process: (prevState, nextState) => {
+            console.timeEnd(`Action: (processing)`);
             return nextState;
         },
     };

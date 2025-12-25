@@ -2,11 +2,17 @@
  * Селекторы с мемоизацией для оптимизации вычислений
  */
 interface SelectorOptions<T> {
+    /** Включить мемоизацию результатов */
     memoize: boolean;
+    /** Максимальный размер кэша для мемоизации */
     maxSize?: number;
+    /** Функция сравнения состояний */
     equalityFn?: (a: T, b: T) => boolean;
 }
 
+/**
+ * Интерфейс селектора с дополнительными методами
+ */
 export interface Selector<T, R> {
     /** Функция вычисления значения из состояния */
     (state: T): R;
@@ -22,7 +28,8 @@ export interface Selector<T, R> {
  * @param selectorFn - функция вычисления значения
  * @param options - настройки мемоизации
  */
-export function createSelector<T, R>(    selectorFn: (state: T) => R,
+export function createSelector<T, R>(
+    selectorFn: (state: T) => R,
     options: SelectorOptions<T> = {memoize: true, maxSize: 1}
 ): Selector<T, R> {
     let lastState: T | null = null;
@@ -40,13 +47,23 @@ export function createSelector<T, R>(    selectorFn: (state: T) => R,
         }
     });
 
+    /**
+     * Внутренняя функция инкремента счетчика
+     */
+    const incrementRecomputations = () => {
+        recomputations++;
+    };
+
+    /**
+     * Основная функция селектора
+     */
     const selector = function (state: T): R {
         // Простая мемоизация с правильным сравнением
         if (options.memoize && lastState !== null && equalityFn(lastState, state)) {
             return lastResult!;
         }
 
-        // LRU кэш
+        // LRU кэш для множественных состояний
         if (options.memoize && options.maxSize && options.maxSize > 1) {
             const key = JSON.stringify(state);
             if (cache.has(key)) {
@@ -56,38 +73,38 @@ export function createSelector<T, R>(    selectorFn: (state: T) => R,
             const result = selectorFn(state);
             cache.set(key, result);
 
-            // Ограничиваем размер кэша
+            // Ограничиваем размер кэша (удаляем самый старый элемент)
             if (cache.size > options.maxSize) {
                 const firstKey = cache.keys().next().value;
                 cache.delete(firstKey);
             }
 
-            recomputations++;
+            incrementRecomputations();
             lastState = state;
             lastResult = result;
-
-            // Обновляем свойство selector
-            selector.recomputations = recomputations;
 
             return result;
         }
 
-        // Без мемоизации
+        // Без мемоизации или простая мемоизация
         const result = selectorFn(state);
-        recomputations++;
+        incrementRecomputations();
         lastState = state;
         lastResult = result;
-        // Обновляем свойство selector
-        selector.recomputations = recomputations;
+
         return result;
     } as Selector<T, R>;
 
-    // Инициализация свойств
+    // Инициализация свойств через defineProperty для корректного getter
     Object.defineProperty(selector, 'recomputations', {
         get: () => recomputations,
         enumerable: true,
+        configurable: false,
     });
 
+    /**
+     * Метод сброса статистики и кэша
+     */
     selector.resetRecomputations = () => {
         recomputations = 0;
         cache.clear();

@@ -59,14 +59,23 @@ export class Store<T, A, E, S> {
     private effects: Map<string, Effect> = new Map();
     private selectors: Map<string, Selector<T, any>> = new Map();
     private plugins: Map<string, any> = new Map();
-    private middlewares: Middleware<T>[] = [];
+    private _middlewares: Middleware<T>[] = [];
 
+    /** Имя store для идентификации */
     public readonly name: string;
+
+    /**
+     * Геттер для доступа к middleware (только для чтения извне)
+     * Используется в action.ts для вызова onAction
+     */
+    public get middlewares(): readonly Middleware<T>[] {
+        return this._middlewares;
+    }
 
     constructor(private config: StoreConfig<T, A, E, S>) {
         this.name = config.name;
         this.state = config.initialState;
-        this.middlewares = config.middlewares || [];
+        this._middlewares = config.middlewares || [];
 
         this.initializeActions();
         this.initializeEffects();
@@ -172,7 +181,7 @@ export class Store<T, A, E, S> {
 
             // Добавляем middleware плагина
             if (plugin.middleware) {
-                this.middlewares.push(plugin.middleware);
+                this._middlewares.push(plugin.middleware);
             }
         } else if (pluginConfig.name) {
             // Уже созданный плагин
@@ -188,20 +197,7 @@ export class Store<T, A, E, S> {
 
             // Добавляем middleware плагина
             if (pluginConfig.middleware) {
-                this.middlewares.push(pluginConfig.middleware);
-            }
-        }
-    }
-
-    /**
-     * Уведомление middleware о выполнении действия
-     */
-    private notifyMiddlewareAction(type: string, payload: any) {
-        const action = {type, payload};
-
-        for (const middleware of this.middlewares) {
-            if (middleware.onAction) {
-                middleware.onAction(action);
+                this._middlewares.push(pluginConfig.middleware);
             }
         }
     }
@@ -214,7 +210,7 @@ export class Store<T, A, E, S> {
 
         // Применяем middleware process для трансформации состояния
         let finalState = nextState;
-        for (const middleware of this.middlewares) {
+        for (const middleware of this._middlewares) {
             if (middleware.process) {
                 finalState = middleware.process(prevState, finalState);
             }
@@ -348,6 +344,8 @@ export class Store<T, A, E, S> {
         this.effects.clear();
         this.selectors.clear();
         this.plugins.clear();
-        this.middlewares = [];
+
+        // Очищаем middleware
+        this._middlewares = [];
     }
 }
