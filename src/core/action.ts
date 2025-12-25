@@ -1,45 +1,44 @@
 /**
- * Action - действие для изменения состояния store
+ * Action — описание действия без внутреннего состояния
  */
-export interface Action<P = any> {
+export interface Action<P = unknown> {
+    readonly type: string;
+    execute: (payload: P) => void;
+}
+
+/**
+ * Контекст для middleware
+ */
+export interface ActionContext<P> {
     type: string;
     payload: P;
-    execute: (payload: P, store?: any) => void;
 }
 
 /**
  * Создание действия для изменения состояния
  * @param type - уникальный тип действия
  * @param executor - функция выполнения действия
- * @param store - опциональный store для middleware
+ * @param middlewares
  */
-export function createAction<P = void>(
+export function createAction<P>(
     type: string,
-    executor: (payload: P, store?: any) => void,
-    store?: any
+    executor: (payload: P) => void,
+    middlewares?: readonly any[]
 ): Action<P> {
-    const action: Action<P> = {
+    return {
         type,
-        payload: undefined as P,
-        execute: (payload: P, currentStore?: any) => {
-            action.payload = payload;
 
-            // Определяем какой store использовать (приоритет currentStore)
-            const targetStore = currentStore || store;
+        execute(payload: P) {
+            const context: ActionContext<P> = { type, payload };
 
-            // Вызываем onAction у middleware перед выполнением действия
-            if (targetStore?.middlewares) {
-                targetStore.middlewares.forEach((middleware: any) => {
-                    if (middleware.onAction) {
-                        middleware.onAction({type, payload});
-                    }
-                });
-            }
+            // Middleware: before action
+            middlewares?.forEach(mw => {
+                mw.onAction?.(context);
+            });
 
-            // Выполняем основное действие
-            executor(payload, targetStore);
+            executor(payload);
 
-            // DevTools интеграция - отправка события
+            // DevTools
             if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
                 (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
                     type: 'ACTION_DISPATCHED',
@@ -50,6 +49,4 @@ export function createAction<P = void>(
             }
         },
     };
-
-    return action;
 }

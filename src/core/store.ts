@@ -1,108 +1,68 @@
-import {Draft, produce} from 'immer';
-import {Action, createAction} from './action';
-import {createEffect, Effect} from './effect';
-import {createSelector, Selector} from './selector';
-import {Middleware} from './middleware';
-import type {Plugin} from '../plugins';
-
-/**
- * Конфигурация Store
- */
-export type StoreConfig<
-    T,
-    A extends Record<string, any>,
-    E extends Record<string, any>,
-    S extends Record<string, any>
-> = {
-    /** Имя store для идентификации */
-    name: string;
-    /** Начальное состояние */
-    initialState: T;
-    /** Действия для изменения состояния */
-    actions: {
-        [K in keyof A]: (state: Draft<T>, payload: Parameters<A[K]>[1]) => void;
-    };
-    /** Асинхронные эффекты */
-    effects?: {
-        [K in keyof E]: (
-            context: StoreContext<T>,
-            payload: Parameters<E[K]>[0]
-        ) => Promise<any>;
-    };
-    /** Селекторы для вычисляемых значений */
-    selectors?: {
-        [K in keyof S]: (state: T) => S[K];
-    };
-    /** Middleware для перехвата изменений */
-    middlewares?: Middleware<T>[];
-    /** Плагины для расширения функциональности */
-    plugins?: Plugin[];
-};
+import { Draft, produce } from 'immer';
+import { Action, createAction } from './action';
+import { createSelector, Selector } from './selector';
+import { Middleware } from './middleware';
+import type { Plugin } from '../plugins';
 
 /**
  * Контекст для эффектов
  */
 export interface StoreContext<T> {
-    getState: () => T;
-    dispatch: (action: Action) => void;
-    actions: Record<string, Action>;
+    getState(): T;
+    dispatch<P>(action: Action<P>, payload: P): void;
 }
 
 /**
- * Основной класс Store
- * Управляет состоянием, действиями, эффектами и селекторами
+ * Основной Store
  */
-export class Store<T, A, E, S> {
+export class Store<T, A extends Record<string, any>, E, S> {
     private state: T;
-    private listeners: Set<(state: T) => void> = new Set();
-    private actions: Map<string, Action> = new Map();
-    private effects: Map<string, Effect> = new Map();
-    private selectors: Map<string, Selector<T, any>> = new Map();
-    private plugins: Map<string, any> = new Map();
-    private _middlewares: Middleware<T>[] = [];
+    private listeners = new Set<(state: T) => void>();
+    private actions = new Map<string, Action<any>>();
+    private selectors = new Map<string, Selector<T, any>>();
+    private middlewares: Middleware<T>[];
 
-    /** Имя store для идентификации */
     public readonly name: string;
 
-    /**
-     * Геттер для доступа к middleware (только для чтения извне)
-     * Используется в action.ts для вызова onAction
-     */
-    public get middlewares(): readonly Middleware<T>[] {
-        return this._middlewares;
-    }
-
-    constructor(private config: StoreConfig<T, A, E, S>) {
+    constructor(
+        private readonly config: {
+            name: string;
+            initialState: T;
+            actions: {
+                [K in keyof A]: (state: Draft<T>, payload: any) => void;
+            };
+            selectors?: {
+                [K in keyof S]: (state: T) => S[K];
+            };
+            middlewares?: Middleware<T>[];
+            plugins?: Plugin[];
+        }
+    ) {
         this.name = config.name;
         this.state = config.initialState;
-        this._middlewares = config.middlewares || [];
+        this.middlewares = config.middlewares ?? [];
 
-        this.initializeActions();
-        this.initializeEffects();
-        this.initializeSelectors();
-        this.initializePlugins();
+        this.initActions();
+        this.initSelectors();
     }
 
     /**
-     * Инициализация действий из конфигурации
+     * Инициализация actions
      */
-    private initializeActions() {
+    private initActions() {
         Object.entries(this.config.actions).forEach(([key, reducer]) => {
-            const actionType = `${this.config.name}/${key}`;
+            const type = `${this.name}/${key}`;
 
             const action = createAction(
-                actionType,
-                (payload: any, store?: any) => {
-                    // Применяем reducer через immer для иммутабельности
-                    const nextState = produce(this.state, (draft: Draft<T>) => {
-                        // Вызываем reducer с draft и payload
-                        (reducer as any)(draft, payload);
+                type,
+                (payload) => {
+                    const nextState = produce(this.state, draft => {
+                        reducer(draft, payload);
                     });
 
-                    // Обновляем состояние через middleware pipeline
-                    this.setState(nextState);
+                    this.applyState(nextState);
                 },
-                this // Передаем текущий store в action для доступа к middleware
+                this.middlewares
             );
 
             this.actions.set(key, action);
@@ -110,244 +70,84 @@ export class Store<T, A, E, S> {
     }
 
     /**
-     * Инициализация эффектов из конфигурации
+     * Инициализация selectors
      */
-    private initializeEffects() {
-        if (!this.config.effects) return;
-
-        Object.entries(this.config.effects).forEach(([key, effectFn]) => {
-            const effect = createEffect(
-                `${this.config.name}/${key}`,
-                async (payload: any) => {
-                    // Создаем контекст для эффекта
-                    const context: StoreContext<T> = {
-                        getState: () => this.state,
-                        dispatch: (action) => this.dispatch(action),
-                        actions: Object.fromEntries(this.actions),
-                    };
-
-                    // Выполняем эффект с переданным контекстом
-                    return await (effectFn as any)(context, payload);
-                }
-            );
-
-            this.effects.set(key, effect);
-        });
-    }
-
-    /**
-     * Инициализация селекторов из конфигурации
-     */
-    private initializeSelectors() {
+    private initSelectors() {
         if (!this.config.selectors) return;
 
-        Object.entries(this.config.selectors).forEach(([key, selectorFn]) => {
-            const selector = createSelector(
-                selectorFn as any,
-                {memoize: true, maxSize: 10}
-            );
-
-            this.selectors.set(key, selector);
-        });
-    }
-
-    /**
-     * Инициализация плагинов из конфигурации
-     */
-    private initializePlugins() {
-        if (!this.config.plugins) return;
-
-        this.config.plugins.forEach(plugin => {
-            this.initializePlugin(plugin);
-        });
-    }
-
-    /**
-     * Инициализация одного плагина
-     */
-    private initializePlugin(pluginConfig: any) {
-        if (typeof pluginConfig === 'function') {
-            // Плагин как фабричная функция
-            const plugin = pluginConfig();
-            this.plugins.set(plugin.name, plugin);
-
-            // Вызываем init если есть
-            if (plugin.init) {
-                const result = plugin.init(this);
-                if (result) {
-                    this.plugins.set(plugin.name, {...plugin, api: result});
-                }
-            }
-
-            // Добавляем middleware плагина
-            if (plugin.middleware) {
-                this._middlewares.push(plugin.middleware);
-            }
-        } else if (pluginConfig.name) {
-            // Уже созданный плагин
-            this.plugins.set(pluginConfig.name, pluginConfig);
-
-            // Вызываем init если есть
-            if (pluginConfig.init) {
-                const result = pluginConfig.init(this);
-                if (result) {
-                    this.plugins.set(pluginConfig.name, {...pluginConfig, api: result});
-                }
-            }
-
-            // Добавляем middleware плагина
-            if (pluginConfig.middleware) {
-                this._middlewares.push(pluginConfig.middleware);
-            }
+        for (const key in this.config.selectors) {
+            const selectorFn = this.config.selectors[key];
+            this.selectors.set(key, createSelector(selectorFn));
         }
     }
 
+
     /**
-     * Обновление состояния с применением middleware
+     * Применение нового состояния через middleware
      */
-    private setState(nextState: T) {
+    private applyState(nextState: T) {
         const prevState = this.state;
 
-        // Применяем middleware process для трансформации состояния
-        const finalState = this._middlewares.reduce(
-            (state, middleware) => middleware.process ? middleware.process(prevState, state) : state,
+        const finalState = this.middlewares.reduce(
+            (state, mw) => mw.process ? mw.process(prevState, state) : state,
             nextState
         );
 
         this.state = finalState;
-
-        // Уведомляем подписчиков об изменении
-        this.notifyListeners();
-
-        // Отправляем событие в DevTools
-        this.notifyDevTools(prevState, finalState);
+        this.listeners.forEach(l => l(this.state));
     }
 
     /**
-     * Уведомление подписчиков о изменении состояния
+     * Dispatch action
      */
-    private notifyListeners() {
-        this.listeners.forEach(listener => listener(this.state));
+    public dispatch<P>(action: Action<P>, payload: P) {
+        action.execute(payload);
     }
 
     /**
-     * Отправка событий в DevTools
-     */
-    private notifyDevTools(prevState: T, nextState: T) {
-        if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
-            (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
-                type: 'STATE_CHANGED',
-                storeName: this.name,
-                prevState,
-                nextState,
-                timestamp: Date.now(),
-            });
-        }
-    }
-
-    /**
-     * Получение текущего состояния
-     */
-    public getState(): T {
-        return this.state;
-    }
-
-    /**
-     * Выполнение действия
-     */
-    public dispatch(action: Action) {
-        action.execute(action.payload);
-    }
-
-    /**
-     * Получение функции действия по ключу
-     * @throws {Error} если действие не найдено
+     * Получить action по ключу
      */
     public getAction<K extends keyof A>(key: K): A[K] {
-        const action = this.actions.get(key as string);
+        const action = this.actions.get(String(key));
         if (!action) {
-            throw new Error(`[${this.name}] Action "${String(key)}" not found`);
+            throw new Error(`Action "${String(key)}" not found`);
         }
         return action.execute as A[K];
     }
 
     /**
-     * Получение функции эффекта по ключу
-     * @throws {Error} если эффект не найден
-     */
-    public getEffect<K extends keyof E>(key: K): E[K] {
-        const effect = this.effects.get(key as string);
-        if (!effect) {
-            throw new Error(`[${this.name}] Effect "${String(key)}" not found`);
-        }
-        return effect.execute as E[K];
-    }
-
-    /**
-     * Получение функции селектора по ключу
-     * @throws {Error} если селектор не найден
+     * Получить selector
      */
     public getSelector<K extends keyof S>(key: K): () => S[K] {
-        const selector = this.selectors.get(key as string);
+        const selector = this.selectors.get(String(key));
         if (!selector) {
-            throw new Error(`[${this.name}] Selector "${String(key)}" not found`);
+            throw new Error(`Selector "${String(key)}" not found`);
         }
         return () => selector(this.state);
     }
 
     /**
-     * Получение инстанса плагина
+     * Подписка на изменения
      */
-    public getPlugin<K extends keyof any>(name: string): any {
-        return this.plugins.get(name)?.instance;
-    }
-
-    /**
-     * Получение API плагина
-     */
-    public getPluginApi(name: string): any {
-        const plugin = this.plugins.get(name);
-        return plugin?.api || plugin?.result?.api;
-    }
-
-    /**
-     * Подписка на изменения состояния
-     * @returns функция отписки
-     */
-    public subscribe(listener: (state: T) => void): () => void {
+    public subscribe(listener: (state: T) => void) {
         this.listeners.add(listener);
         return () => this.listeners.delete(listener);
     }
 
     /**
-     * Гидратация состояния (например, при SSR)
+     * Гидратация состояния (SSR)
      */
     public hydrate(state: T) {
         this.state = state;
-        this.notifyListeners();
+        this.listeners.forEach(l => l(this.state));
     }
 
     /**
-     * Уничтожение store и очистка ресурсов
+     * Очистка ресурсов
      */
     public destroy() {
-        // Очищаем listeners
         this.listeners.clear();
-
-        // Вызываем destroy у плагинов
-        this.plugins.forEach((plugin) => {
-            if (plugin.instance?.destroy) {
-                plugin.instance.destroy(this);
-            }
-        });
-
-        // Очищаем коллекции
         this.actions.clear();
-        this.effects.clear();
         this.selectors.clear();
-        this.plugins.clear();
-
-        // Очищаем middleware
-        this._middlewares = [];
     }
 }

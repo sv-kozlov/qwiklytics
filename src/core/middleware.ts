@@ -1,47 +1,48 @@
 /**
- * Middleware для Store
- * Позволяет перехватывать и модифицировать состояние и действия
+ * Контекст middleware
  */
-
-export interface Middleware<T> {
-    /** Обработка изменения состояния */
-    process: (prevState: T, nextState: T) => T;
-    /** Обработка действий перед их выполнением */
-    onAction?: (action: any) => void;
+export interface MiddlewareContext<P = unknown> {
+    type: string;
+    payload: P;
 }
 
 /**
- * Logger middleware - логирование всех изменений состояния
- * @param storeName - имя store для идентификации в логах
+ * Middleware Store
+ */
+export interface Middleware<T> {
+    /** Перехват действия */
+    onAction?<P>(action: MiddlewareContext<P>): void;
+
+    /** Обработка изменения состояния */
+    process?(prevState: T, nextState: T): T;
+}
+
+/**
+ * Logger middleware
  */
 export function createLoggerMiddleware<T>(storeName: string): Middleware<T> {
     return {
-        process: (prevState, nextState) => {
-            console.group(`📦 Store: ${storeName}`);
-            console.log('⬅️  Previous state:', prevState);
-            console.log('➡️  Next state:', nextState);
-            console.groupEnd();
-            return nextState;
+        onAction(action) {
+            console.log(`🎬 [${storeName}] Action:`, action.type, action.payload);
         },
-        onAction: (action) => {
-            console.log(`🎬 Action: ${action.type}`, action.payload);
+        process(prev, next) {
+            console.group(`📦 Store: ${storeName}`);
+            console.log('Prev:', prev);
+            console.log('Next:', next);
+            console.groupEnd();
+            return next;
         },
     };
 }
 
 /**
- * Analytics middleware - отправка событий в систему аналитики
- * @param track - функция отправки событий
+ * Analytics middleware
  */
 export function createAnalyticsMiddleware<T>(
-    track: (event: string, data: any) => void
+    track: (event: string, data: unknown) => void
 ): Middleware<T> {
     return {
-        process: (prevState, nextState) => {
-            // Не модифицируем состояние, только отслеживаем
-            return nextState;
-        },
-        onAction: (action) => {
+        onAction(action) {
             track('store_action', {
                 type: action.type,
                 payload: action.payload,
@@ -52,183 +53,103 @@ export function createAnalyticsMiddleware<T>(
 }
 
 /**
- * Validation middleware - валидация состояния перед применением
- * @param validator - функция валидации состояния
+ * Validation middleware
  */
 export function createValidationMiddleware<T>(
     validator: (state: T) => boolean | string
 ): Middleware<T> {
     return {
-        process: (prevState, nextState) => {
-            const result = validator(nextState);
-
-            if (result === false || typeof result === 'string') {
-                const errorMessage = typeof result === 'string' ? result : 'Validation failed';
-                console.error('❌ State validation failed:', errorMessage);
-                console.log('🔄 Reverting to previous state');
-                return prevState; // Откатываем к предыдущему состоянию
+        process(prev, next) {
+            const result = validator(next);
+            if (result !== true) {
+                console.error('❌ State validation failed:', result);
+                return prev;
             }
-
-            return nextState;
+            return next;
         },
     };
 }
 
 /**
- * Throttle middleware - ограничение частоты обновлений состояния
- * @param delay - минимальная задержка в миллисекундах между обновлениями
+ * Throttle middleware (state-level)
+ * ⚠️ Ограничивает частоту применения state
  */
 export function createThrottleMiddleware<T>(delay: number): Middleware<T> {
-    let lastUpdate = 0;
-    let throttleCount = 0;
+    let lastApply = 0;
 
     return {
-        process: (prevState, nextState) => {
+        process(prev, next) {
             const now = Date.now();
-
-            // Если прошло достаточно времени - применяем обновление
-            if (now - lastUpdate >= delay) {
-                lastUpdate = now;
-                if (throttleCount > 0) {
-                    console.debug(`⏱️  Throttled ${throttleCount} updates (${delay}ms)`);
-                    throttleCount = 0;
-                }
-                return nextState;
+            if (now - lastApply < delay) {
+                return prev;
             }
-
-            // Иначе - игнорируем обновление (throttle)
-            throttleCount++;
-            return prevState;
+            lastApply = now;
+            return next;
         },
     };
 }
 
 /**
- * Debounce middleware - отложенное применение изменений состояния
- * Примечание: Данный middleware работает синхронно и не может
- * откладывать обновления асинхронно в текущей архитектуре.
- * Для полноценного debounce требуется асинхронная обработка в Store.
- * @param delay - задержка в миллисекундах перед применением
- */
-export function createDebounceMiddleware<T>(delay: number): Middleware<T> {
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let lastUpdate = 0;
-    let debounceCount = 0;
-
-    return {
-        process: (prevState, nextState) => {
-            const now = Date.now();
-
-            // Очищаем предыдущий таймер
-            if (timeoutId !== null) {
-                clearTimeout(timeoutId);
-                debounceCount++;
-            }
-
-            // Если прошло достаточно времени с последнего обновления
-            if (now - lastUpdate >= delay) {
-                lastUpdate = now;
-                if (debounceCount > 0) {
-                    console.debug(`⏳ Debounced ${debounceCount} updates (${delay}ms)`);
-                    debounceCount = 0;
-                }
-                return nextState;
-            }
-
-            // Устанавливаем таймер для будущего обновления
-            timeoutId = setTimeout(() => {
-                lastUpdate = Date.now();
-                timeoutId = null;
-            }, delay);
-
-            // Возвращаем предыдущее состояние (отложенное не применяется сразу)
-            return prevState;
-        },
-    };
-}
-
-/**
- * Freeze middleware - замораживание состояния для предотвращения мутаций
+ * Freeze middleware (DEV ONLY)
  */
 export function createFreezeMiddleware<T>(): Middleware<T> {
-    /**
-     * Глубокое замораживание объекта
-     * @param obj - объект для замораживания
-     */
-    const deepFreeze = (obj: any): any => {
-        // Замораживаем сам объект
-        Object.freeze(obj);
-
-        // Рекурсивно замораживаем все свойства
-        Object.getOwnPropertyNames(obj).forEach(prop => {
-            const value = obj[prop];
-            if (value && typeof value === 'object' && !Object.isFrozen(value)) {
-                deepFreeze(value);
-            }
-        });
-
-        return obj;
-    };
-
     return {
-        process: (prevState, nextState) => {
-            return deepFreeze(nextState);
+        process(_, next) {
+            if (process.env.NODE_ENV !== 'production') {
+                Object.freeze(next);
+            }
+            return next;
         },
     };
 }
 
 /**
- * Diff middleware - логирование только изменений в состоянии
- * @param storeName - имя store для идентификации в логах
+ * Diff middleware
  */
-export function createDiffMiddleware<T>(storeName: string): Middleware<T> {
+export function createDiffMiddleware<T extends object>(
+    storeName: string
+): Middleware<T> {
     return {
-        process: (prevState, nextState) => {
-            // Простое сравнение на верхнем уровне
-            const changes: Record<string, { from: any; to: any }> = {};
+        process(prev, next) {
+            const diff: Record<string, { from: unknown; to: unknown }> = {};
 
-            const prevKeys = Object.keys(prevState as any);
-            const nextKeys = Object.keys(nextState as any);
-            const allKeys = new Set([...prevKeys, ...nextKeys]);
-
-            allKeys.forEach(key => {
-                const prevValue = (prevState as any)[key];
-                const nextValue = (nextState as any)[key];
-
-                if (prevValue !== nextValue) {
-                    changes[key] = {from: prevValue, to: nextValue};
+            for (const key of Object.keys({...prev, ...next})) {
+                if ((prev as any)[key] !== (next as any)[key]) {
+                    diff[key] = {
+                        from: (prev as any)[key],
+                        to: (next as any)[key],
+                    };
                 }
-            });
+            }
 
-            if (Object.keys(changes).length > 0) {
-                console.group(`🔍 Store Diff: ${storeName}`);
-                console.table(changes);
+            if (Object.keys(diff).length) {
+                console.group(`🔍 Diff [${storeName}]`);
+                console.table(diff);
                 console.groupEnd();
             }
 
-            return nextState;
+            return next;
         },
     };
 }
 
 /**
- * Performance middleware - измерение производительности обновлений
- * @param storeName - имя store для идентификации в логах
+ * Performance middleware
  */
-export function createPerformanceMiddleware<T>(storeName: string): Middleware<T> {
-    let currentActionType: string | null = null;
+export function createPerformanceMiddleware<T>(): Middleware<T> {
+    let label: string | null = null;
 
     return {
-        onAction: (action) => {
-            currentActionType = action.type;
-            console.time(`⚡ ${currentActionType}`);
+        onAction(action) {
+            label = `⚡ ${action.type}`;
+            console.time(label);
         },
-        process: (prevState, nextState) => {
-            if (currentActionType) {
-                console.timeEnd(`⚡ ${currentActionType}`);
-                currentActionType = null;
+        process(_, next) {
+            if (label) {
+                console.timeEnd(label);
+                label = null;
             }
-            return nextState;
+            return next;
         },
     };
 }
