@@ -10,9 +10,12 @@ import {
     useVisibleTask$,
 } from '@builder.io/qwik';
 
-import type {ActionMap, EffectMap, SelectorMap} from '../core/types';
-import type {Store} from '../core/store';
-import {createStoreContext, type StoreConfig} from './integration';
+import type { ActionMap, EffectMap, SelectorMap } from '../core/types';
+import type { Store } from '../core/store';
+import { createStoreContext, type StoreConfig } from './integration';
+
+// Qwik-обвязки для плагинов (единая точка входа из src/qwik/hooks.ts)
+export { useHistoryPlugin$, type HistoryHookResult } from './plugins/history';
 
 /**
  * Синхронизирует объектное состояние:
@@ -29,6 +32,7 @@ function syncObjectState<T extends object>(target: T, next: T) {
             delete (target as Record<string, unknown>)[key as string];
         }
     }
+
     // Копируем/перезаписываем актуальные значения
     Object.assign(target, next);
 }
@@ -85,7 +89,7 @@ export function useStore$<
     storeConfig: StoreConfig<T, A, E, S>,
     options: UseStoreOptions<S> = {}
 ): UseStoreResult<T, A, E, S> {
-    const {useStoreInstance} = createStoreContext(storeConfig);
+    const { useStoreInstance } = createStoreContext(storeConfig);
 
     // Store должен быть предоставлен через Provider выше по дереву
     const store = useStoreInstance();
@@ -103,7 +107,7 @@ export function useStore$<
     /**
      * Подписка на изменения store — только на клиенте.
      */
-    useVisibleTask$(({cleanup}) => {
+    useVisibleTask$(({ cleanup }) => {
         const s = storeSig.value;
         if (!s) return;
 
@@ -141,8 +145,7 @@ export function useStore$<
      * Селекторы — computed на базе текущего store.state.
      * Можно ограничить набор через options.selectors.
      */
-    const selectors: { [K in keyof S]?: ReturnType<typeof useComputed$<S[K]>> } =
-        {};
+    const selectors: { [K in keyof S]?: ReturnType<typeof useComputed$<S[K]>> } = {};
 
     const selectorKeys = options.selectors ?? (storeConfig.selectors
         ? (Object.keys(storeConfig.selectors) as Array<keyof S>)
@@ -158,7 +161,7 @@ export function useStore$<
         });
     }
 
-    return {state, actions, effects, selectors, store};
+    return { state, actions, effects, selectors, store };
 }
 
 /**

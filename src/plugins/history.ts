@@ -1,3 +1,5 @@
+// src/plugins/history.ts
+
 /**
  * Конфигурация undo/redo плагина
  */
@@ -84,6 +86,7 @@ export interface HistoryAPI<T extends object> {
     canUndo(): boolean;
     canRedo(): boolean;
 
+    /** Текущее внутреннее состояние истории */
     getState(): HistoryState<T>;
 
     /** Для UI: получить последние записи */
@@ -171,7 +174,7 @@ export function createHistoryPlugin<T extends object>(
 
             storage.setItem(persistKey, JSON.stringify(data));
         } catch {
-            // не падаем из-за quota / json
+            // ignore quota / json errors
         }
     }
 
