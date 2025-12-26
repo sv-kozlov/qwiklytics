@@ -1,467 +1,386 @@
+/**
+ * Конфигурация undo/redo плагина
+ */
 export interface HistoryPluginConfig {
-  limit?: number;          // Максимальное количество записей в истории
-  filterActions?: string[]; // Какие действия отслеживать (если пусто - все)
-  excludeActions?: string[]; // Какие действия игнорировать
-  debounceTime?: number;   // Дебаунс для группировки действий
-  persistKey?: string;     // Ключ для сохранения в localStorage
+    /** Максимальное количество записей в истории */
+    limit?: number;
+
+    /** Отслеживать только эти action types (если пусто — все) */
+    filterActions?: string[];
+
+    /** Игнорировать эти action types */
+    excludeActions?: string[];
+
+    /**
+     * Дебаунс (мс) для группировки частых обновлений.
+     * Полезно, когда state меняется серией быстрых действий.
+     */
+    debounceTime?: number;
+
+    /**
+     * Ключ для сохранения истории в localStorage.
+     * Если не задан — история не сохраняется.
+     */
+    persistKey?: string;
 }
 
-export interface HistoryEntry {
-  id: string;
-  action: string;
-  timestamp: number;
-  prevState: any;
-  nextState: any;
-  diff: any;
+/**
+ * Запись в истории
+ */
+export interface HistoryEntry<T> {
+    id: string;
+    action: string;
+    timestamp: number;
+    prevState: T;
+    nextState: T;
 }
 
-export interface HistoryState {
-  past: HistoryEntry[];    // История для undo
-  present: any;           // Текущее состояние
-  future: HistoryEntry[]; // История для redo
-  isUndoing: boolean;
-  isRedoing: boolean;
+/**
+ * Состояние истории
+ */
+export interface HistoryState<T> {
+    past: HistoryEntry<T>[];
+    present: T | null;
+    future: HistoryEntry<T>[];
+    isUndoing: boolean;
+    isRedoing: boolean;
 }
 
-export function createHistoryPlugin(config: HistoryPluginConfig = {}) {
-  const {
-    limit = 50,
-    filterActions = [],
-    excludeActions = [],
-    debounceTime = 0,
-    persistKey = 'qwiklytics-history',
-  } = config;
+/**
+ * Минимальный host-адаптер для плагинов.
+ * Реализация может быть поверх core.Store, Qwik-обвязки, или любого другого рантайма.
+ */
+export interface PluginHost<T extends object> {
+    /** Получить текущее состояние */
+    getState(): T;
 
-  let historyState: HistoryState = {
-    past: [],
-    present: null,
-    future: [],
-    isUndoing: false,
-    isRedoing: false,
-  };
+    /**
+     * Установить состояние.
+     * Важно для undo/redo и восстановления из persist.
+     */
+    setState(next: T): void;
 
-  let debounceTimer: any = null;
-  let lastActionTime = 0;
-  const ACTION_GROUP_THRESHOLD = 500; // Группируем действия в пределах 500мс
+    /** Подписка на изменения состояния */
+    subscribe(listener: (state: T) => void): () => void;
 
-  // Утилита для глубокого сравнения
-  function deepDiff(obj1: any, obj2: any): any {
-    if (obj1 === obj2) return null;
-    if (typeof obj1 !== 'object' || typeof obj2 !== 'object' || 
-        obj1 === null || obj2 === null) {
-      return obj2;
-    }
+    /**
+     * (Опционально) Подписка на события action.
+     * Если поддерживается — history будет хранить корректный action type.
+     */
+    subscribeAction?(
+        listener: (ctx: { type: string; payload: unknown }) => void
+    ): () => void;
+}
 
-    const diff: any = {};
-    const allKeys = new Set([...Object.keys(obj1), ...Object.keys(obj2)]);
+/**
+ * API истории, которое плагин отдаёт наружу
+ */
+export interface HistoryAPI<T extends object> {
+    undo(): void;
+    redo(): void;
 
-    for (const key of allKeys) {
-      const val1 = obj1[key];
-      const val2 = obj2[key];
+    clearHistory(): void;
 
-      if (val1 === val2) continue;
+    canUndo(): boolean;
+    canRedo(): boolean;
 
-      if (typeof val1 === 'object' && typeof val2 === 'object' &&
-          val1 !== null && val2 !== null) {
-        const nestedDiff = deepDiff(val1, val2);
-        if (nestedDiff !== null) {
-          diff[key] = nestedDiff;
-        }
-      } else {
-        diff[key] = val2;
-      }
-    }
+    getState(): HistoryState<T>;
 
-    return Object.keys(diff).length > 0 ? diff : null;
-  }
+    /** Для UI: получить последние записи */
+    getEntries(options?: { limit?: number }): HistoryEntry<T>[];
+}
 
-  // Утилита для применения diff
-  function applyDiff(state: any, diff: any): any {
-    if (!diff) return state;
+/**
+ * Плагин истории
+ */
+export interface HistoryPlugin<T extends object> {
+    name: 'history';
+    init(host: PluginHost<T>): () => void;
+    api: HistoryAPI<T>;
+}
 
-    const result = { ...state };
-    for (const key in diff) {
-      if (typeof diff[key] === 'object' && diff[key] !== null && 
-          !Array.isArray(diff[key])) {
-        result[key] = applyDiff(result[key] || {}, diff[key]);
-      } else {
-        result[key] = diff[key];
-      }
-    }
-    return result;
-  }
+/** Безопасная генерация id */
+function createId() {
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
-  // Сохранение состояния в localStorage
-  function persistHistory() {
-    if (!persistKey || typeof window === 'undefined') return;
-    
-    try {
-      const data = {
-        past: historyState.past.slice(-10), // Сохраняем только последние 10
-        present: historyState.present,
-        version: 1,
-      };
-      localStorage.setItem(persistKey, JSON.stringify(data));
-    } catch (error) {
-      console.warn('Failed to persist history:', error);
-    }
-  }
-
-  // Загрузка из localStorage
-  function loadPersistedHistory() {
-    if (!persistKey || typeof window === 'undefined') return;
-    
-    try {
-      const saved = localStorage.getItem(persistKey);
-      if (saved) {
-        const data = JSON.parse(saved);
-        if (data.version === 1) {
-          historyState.past = data.past || [];
-          historyState.present = data.present;
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to load persisted history:', error);
-    }
-  }
-
-  // Проверка, нужно ли отслеживать действие
-  function shouldTrackAction(actionType: string): boolean {
-    if (excludeActions.includes(actionType)) return false;
-    if (filterActions.length > 0 && !filterActions.includes(actionType)) {
-      return false;
+function isActionAllowed(
+    type: string,
+    filterActions?: string[],
+    excludeActions?: string[]
+) {
+    if (excludeActions?.includes(type)) return false;
+    if (filterActions && filterActions.length > 0) {
+        return filterActions.includes(type);
     }
     return true;
-  }
-
-  // Добавление записи в историю
-  function addToHistory(action: string, prevState: any, nextState: any) {
-    if (!shouldTrackAction(action)) return;
-    if (historyState.isUndoing || historyState.isRedoing) return;
-
-    const now = Date.now();
-    const diff = deepDiff(prevState, nextState);
-    
-    // Если изменений нет, не добавляем в историю
-    if (!diff) return;
-
-    const entry: HistoryEntry = {
-      id: `${action}-${now}-${Math.random().toString(36).substr(2, 9)}`,
-      action,
-      timestamp: now,
-      prevState,
-      nextState,
-      diff,
-    };
-
-    // Группировка быстрых действий
-    if (now - lastActionTime < ACTION_GROUP_THRESHOLD && 
-        historyState.past.length > 0) {
-      const lastEntry = historyState.past[historyState.past.length - 1];
-      
-      // Если это то же самое действие, объединяем
-      if (lastEntry.action === action) {
-        lastEntry.nextState = nextState;
-        lastEntry.diff = deepDiff(lastEntry.prevState, nextState);
-        lastActionTime = now;
-        return;
-      }
-    }
-
-    // Добавляем новую запись
-    historyState.past.push(entry);
-    historyState.present = nextState;
-    
-    // Очищаем future при новом действии
-    historyState.future = [];
-    
-    // Ограничиваем размер истории
-    if (historyState.past.length > limit) {
-      historyState.past = historyState.past.slice(-limit);
-    }
-
-    lastActionTime = now;
-    
-    // Сохраняем в localStorage с дебаунсом
-    if (debounceTime > 0) {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(persistHistory, debounceTime);
-    } else {
-      persistHistory();
-    }
-
-    // Отправляем в DevTools
-    if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
-      (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
-        type: 'HISTORY_ADDED',
-        entry,
-        historyLength: historyState.past.length,
-      });
-    }
-  }
-
-  // Undo
-  function undo() {
-    if (historyState.past.length === 0) return null;
-    
-    historyState.isUndoing = true;
-    
-    const lastEntry = historyState.past.pop()!;
-    historyState.future.unshift({
-      ...lastEntry,
-      id: `${lastEntry.action}-undo-${Date.now()}`,
-      timestamp: Date.now(),
-    });
-    
-    const previousState = lastEntry.prevState;
-    historyState.present = previousState;
-    
-    historyState.isUndoing = false;
-    
-    // DevTools
-    if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
-      (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
-        type: 'HISTORY_UNDO',
-        entry: lastEntry,
-        historyLength: historyState.past.length,
-        futureLength: historyState.future.length,
-      });
-    }
-    
-    persistHistory();
-    return previousState;
-  }
-
-  // Redo
-  function redo() {
-    if (historyState.future.length === 0) return null;
-    
-    historyState.isRedoing = true;
-    
-    const nextEntry = historyState.future.shift()!;
-    historyState.past.push({
-      ...nextEntry,
-      id: `${nextEntry.action}-redo-${Date.now()}`,
-      timestamp: Date.now(),
-    });
-    
-    const nextState = nextEntry.nextState;
-    historyState.present = nextState;
-    
-    historyState.isRedoing = false;
-    
-    // DevTools
-    if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
-      (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
-        type: 'HISTORY_REDO',
-        entry: nextEntry,
-        historyLength: historyState.past.length,
-        futureLength: historyState.future.length,
-      });
-    }
-    
-    persistHistory();
-    return nextState;
-  }
-
-  // Прыжок к определенной точке в истории
-  function jumpToPoint(entryId: string) {
-    const pastIndex = historyState.past.findIndex(entry => entry.id === entryId);
-    const futureIndex = historyState.future.findIndex(entry => entry.id === entryId);
-    
-    if (pastIndex !== -1) {
-      // Откатываемся к точке в past
-      const entriesToMove = historyState.past.slice(pastIndex + 1);
-      historyState.future = [...entriesToMove.reverse(), ...historyState.future];
-      historyState.past = historyState.past.slice(0, pastIndex + 1);
-      historyState.present = historyState.past[historyState.past.length - 1].nextState;
-    } else if (futureIndex !== -1) {
-      // Переходим к точке в future
-      const entriesToMove = historyState.future.slice(0, futureIndex + 1);
-      historyState.past = [...historyState.past, ...entriesToMove];
-      historyState.future = historyState.future.slice(futureIndex + 1);
-      historyState.present = entriesToMove[entriesToMove.length - 1].nextState;
-    }
-    
-    persistHistory();
-    return historyState.present;
-  }
-
-  // Очистка истории
-  function clearHistory() {
-    historyState = {
-      past: [],
-      present: null,
-      future: [],
-      isUndoing: false,
-      isRedoing: false,
-    };
-    
-    if (persistKey && typeof window !== 'undefined') {
-      localStorage.removeItem(persistKey);
-    }
-    
-    // DevTools
-    if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
-      (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
-        type: 'HISTORY_CLEARED',
-      });
-    }
-  }
-
-  // Получение информации об истории
-  function getHistoryInfo() {
-    return {
-      canUndo: historyState.past.length > 0,
-      canRedo: historyState.future.length > 0,
-      pastCount: historyState.past.length,
-      futureCount: historyState.future.length,
-      totalActions: historyState.past.length + historyState.future.length,
-      limit,
-    };
-  }
-
-  // Получение списка записей
-  function getHistoryEntries(options?: {
-    limit?: number;
-    offset?: number;
-    filterAction?: string;
-  }) {
-    const { limit: entriesLimit = 20, offset = 0, filterAction } = options || {};
-    
-    let entries = [...historyState.past, ...historyState.future];
-    
-    if (filterAction) {
-      entries = entries.filter(entry => entry.action.includes(filterAction));
-    }
-    
-    entries.sort((a, b) => b.timestamp - a.timestamp); // Сначала новые
-    
-    return {
-      entries: entries.slice(offset, offset + entriesLimit),
-      total: entries.length,
-      hasMore: offset + entriesLimit < entries.length,
-    };
-  }
-
-  // Восстановление состояния из истории
-  function restoreFromHistory(state: any) {
-    historyState.present = state;
-    persistHistory();
-  }
-
-  return {
-    name: 'history',
-    
-    init(store: any) {
-      loadPersistedHistory();
-      
-      // Сохраняем начальное состояние
-      historyState.present = store.getState();
-      
-      // Подписываемся на изменения store
-      const unsubscribe = store.subscribe((nextState: any) => {
-        if (historyState.present === null) {
-          historyState.present = nextState;
-          return;
-        }
-        
-        // Получаем последнее действие из DevTools или middleware
-        const lastAction = (window as any).__QWIKLYTICS_LAST_ACTION;
-        if (lastAction) {
-          addToHistory(lastAction.type, historyState.present, nextState);
-        }
-        
-        historyState.present = nextState;
-      });
-      
-      // Middleware для отслеживания действий
-      const historyMiddleware = {
-        process: (prevState: any, nextState: any) => {
-          // Информация о действии будет приходить через глобальную переменную
-          // которую устанавливает система действий
-          return nextState;
-        },
-        onAction: (action: any) => {
-          // Сохраняем последнее действие для истории
-          if (typeof window !== 'undefined') {
-            (window as any).__QWIKLYTICS_LAST_ACTION = action;
-          }
-        },
-      };
-      
-      // Добавляем middleware в store
-      store.middlewares.push(historyMiddleware);
-      
-      // Возвращаем API для управления историей
-      return {
-        unsubscribe,
-        api: {
-          undo: () => {
-            const state = undo();
-            if (state) store.hydrate(state);
-          },
-          redo: () => {
-            const state = redo();
-            if (state) store.hydrate(state);
-          },
-          jumpToPoint,
-          clearHistory,
-          getHistoryInfo,
-          getHistoryEntries,
-          restoreFromHistory,
-          getHistoryState: () => ({ ...historyState }),
-        },
-      };
-    },
-    
-    // API для использования вне плагина
-    api: {
-      undo,
-      redo,
-      jumpToPoint,
-      clearHistory,
-      getHistoryInfo,
-      getHistoryEntries,
-      restoreFromHistory,
-    },
-  };
 }
 
-// Хук для использования истории в Qwik компонентах
-export function createHistoryHook(store: any) {
-  const historyApi = store.plugins.history?.api;
-  
-  if (!historyApi) {
-    throw new Error('History plugin not initialized for this store');
-  }
-  
-  return () => {
-    const canUndo = useSignal(false);
-    const canRedo = useSignal(false);
-    const historyInfo = useSignal({ pastCount: 0, futureCount: 0 });
-    
-    // Подписываемся на изменения истории
-    useTask$(({ track }) => {
-      const info = historyApi.getHistoryInfo();
-      track(() => info);
-      
-      canUndo.value = info.canUndo;
-      canRedo.value = info.canRedo;
-      historyInfo.value = {
-        pastCount: info.pastCount,
-        futureCount: info.futureCount,
-      };
-    });
-    
-    return {
-      canUndo,
-      canRedo,
-      historyInfo,
-      undo: $(() => historyApi.undo()),
-      redo: $(() => historyApi.redo()),
-      clearHistory: $(() => historyApi.clearHistory()),
-      getHistoryEntries: $(historyApi.getHistoryEntries),
+function getStorage() {
+    // SSR-safe
+    if (typeof window === 'undefined') return null;
+    return window.localStorage;
+}
+
+/**
+ * Создаёт undo/redo плагин.
+ * Важно: плагин не зависит от Qwik и может использоваться в любых обвязках.
+ */
+export function createHistoryPlugin<T extends object>(
+    config: HistoryPluginConfig = {}
+): HistoryPlugin<T> {
+    const {
+        limit = 50,
+        filterActions,
+        excludeActions,
+        debounceTime = 0,
+        persistKey,
+    } = config;
+
+    let hostRef: PluginHost<T> | null = null;
+
+    let historyState: HistoryState<T> = {
+        past: [],
+        present: null,
+        future: [],
+        isUndoing: false,
+        isRedoing: false,
     };
-  };
+
+    // Последний action type, если host умеет сообщать
+    let lastActionType: string | null = null;
+
+    // Debounce-буфер
+    let pendingPrev: T | null = null;
+    let pendingNext: T | null = null;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function persistHistory() {
+        if (!persistKey) return;
+
+        const storage = getStorage();
+        if (!storage) return;
+
+        try {
+            const data = {
+                version: 1,
+                // не раздуваем localStorage: сохраняем ограниченно
+                past: historyState.past.slice(-10),
+                present: historyState.present,
+            };
+
+            storage.setItem(persistKey, JSON.stringify(data));
+        } catch {
+            // не падаем из-за quota / json
+        }
+    }
+
+    function restoreHistory() {
+        if (!persistKey) return;
+
+        const storage = getStorage();
+        if (!storage) return;
+
+        try {
+            const raw = storage.getItem(persistKey);
+            if (!raw) return;
+
+            const parsed = JSON.parse(raw) as {
+                version: number;
+                past: HistoryEntry<T>[];
+                present: T | null;
+            };
+
+            if (parsed?.version !== 1) return;
+
+            historyState = {
+                past: Array.isArray(parsed.past) ? parsed.past : [],
+                present: parsed.present ?? null,
+                future: [],
+                isUndoing: false,
+                isRedoing: false,
+            };
+        } catch {
+            // ignore
+        }
+    }
+
+    function pushEntry(prevState: T, nextState: T, actionType: string) {
+        const entry: HistoryEntry<T> = {
+            id: createId(),
+            action: actionType,
+            timestamp: Date.now(),
+            prevState,
+            nextState,
+        };
+
+        historyState.past = [...historyState.past, entry].slice(-limit);
+        historyState.present = nextState;
+        historyState.future = [];
+
+        persistHistory();
+    }
+
+    function flushDebounce() {
+        if (!pendingPrev || !pendingNext) return;
+
+        const actionType = lastActionType ?? '(unknown)';
+        if (isActionAllowed(actionType, filterActions, excludeActions)) {
+            pushEntry(pendingPrev, pendingNext, actionType);
+        }
+
+        pendingPrev = null;
+        pendingNext = null;
+        debounceTimer = null;
+    }
+
+    function scheduleDebounce(prevState: T, nextState: T) {
+        pendingPrev = prevState;
+        pendingNext = nextState;
+
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(flushDebounce, debounceTime);
+    }
+
+    function undo() {
+        const host = hostRef;
+        if (!host) return;
+
+        const last = historyState.past[historyState.past.length - 1];
+        if (!last) return;
+
+        historyState.isUndoing = true;
+        historyState.past = historyState.past.slice(0, -1);
+
+        // переносим в future запись, которая описывает переход обратно
+        const redoEntry: HistoryEntry<T> = {
+            id: createId(),
+            action: last.action,
+            timestamp: Date.now(),
+            prevState: last.prevState,
+            nextState: last.nextState,
+        };
+
+        historyState.future = [redoEntry, ...historyState.future];
+        historyState.present = last.prevState;
+
+        host.setState(last.prevState);
+
+        historyState.isUndoing = false;
+        persistHistory();
+    }
+
+    function redo() {
+        const host = hostRef;
+        if (!host) return;
+
+        const next = historyState.future[0];
+        if (!next) return;
+
+        historyState.isRedoing = true;
+        historyState.future = historyState.future.slice(1);
+
+        const entry: HistoryEntry<T> = {
+            id: createId(),
+            action: next.action,
+            timestamp: Date.now(),
+            prevState: next.prevState,
+            nextState: next.nextState,
+        };
+
+        historyState.past = [...historyState.past, entry].slice(-limit);
+        historyState.present = next.nextState;
+
+        host.setState(next.nextState);
+
+        historyState.isRedoing = false;
+        persistHistory();
+    }
+
+    function clearHistory() {
+        historyState = {
+            past: [],
+            present: hostRef?.getState() ?? historyState.present,
+            future: [],
+            isUndoing: false,
+            isRedoing: false,
+        };
+        persistHistory();
+    }
+
+    function canUndo() {
+        return historyState.past.length > 0;
+    }
+
+    function canRedo() {
+        return historyState.future.length > 0;
+    }
+
+    function getEntries(options?: { limit?: number }) {
+        const l = options?.limit ?? 20;
+        return historyState.past.slice(-l);
+    }
+
+    function init(host: PluginHost<T>) {
+        hostRef = host;
+
+        // Восстановим историю из storage до первой подписки
+        restoreHistory();
+
+        // Инициализируем present, если не было restore
+        if (historyState.present === null) {
+            historyState.present = host.getState();
+        }
+
+        let prevState = host.getState();
+
+        const unsubState = host.subscribe(nextState => {
+            // Если это undo/redo — не пишем новые записи истории
+            if (historyState.isUndoing || historyState.isRedoing) {
+                prevState = nextState;
+                return;
+            }
+
+            // Если нет subscribeAction — action неизвестен
+            const actionType = lastActionType ?? '(unknown)';
+
+            if (debounceTime > 0) {
+                scheduleDebounce(prevState, nextState);
+            } else if (
+                isActionAllowed(actionType, filterActions, excludeActions)
+            ) {
+                pushEntry(prevState, nextState, actionType);
+            }
+
+            prevState = nextState;
+            lastActionType = null;
+        });
+
+        const unsubAction =
+            host.subscribeAction?.(ctx => {
+                lastActionType = ctx.type;
+            }) ?? null;
+
+        return () => {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            flushDebounce();
+            unsubState();
+            unsubAction?.();
+            hostRef = null;
+        };
+    }
+
+    return {
+        name: 'history',
+        init,
+        api: {
+            undo,
+            redo,
+            clearHistory,
+            canUndo,
+            canRedo,
+            getState: () => historyState,
+            getEntries,
+        },
+    };
 }
