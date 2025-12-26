@@ -67,7 +67,7 @@ export const createThrottleMiddleware = <T>(delay: number): Middleware<T> => {
  */
 export const createFreezeMiddleware = <T>(): Middleware<T> => ({
     process(_, next) {
-        if (import.meta.env.DEV) {
+        if (__QWIKLYTICS_DEV__) {
             Object.freeze(next);
         }
         return next;

@@ -1,7 +1,7 @@
 // src/devtools/index.ts
 
 /**
- * DevTools слой — браузерный мост между приложением и панелью расширения.
+ * DevTools ядро — браузерный мост между приложением и панелью расширения.
  *
  * Принципы:
  * - никаких зависимостей от Qwik/React
@@ -25,33 +25,38 @@ export type DevToolsDispatchPayload =
     | { type: 'HISTORY_CLEAR' }
     | { type: string; payload?: unknown };
 
-type DevToolsListener = (event: DevToolsEvent) => void;
+export type DevToolsInitMessage = {
+    source: string;
+    type: 'INIT';
+    events: DevToolsEvent[];
+    plugins: Record<string, unknown>;
+};
+
+export type DevToolsEventMessage = {
+    source: string;
+    type: 'EVENT';
+    event: DevToolsEvent;
+};
 
 export type DevToolsGlobal = {
-    /** Логировать событие в DevTools */
     push(
         event: Omit<DevToolsEvent, 'id' | 'timestamp'> & { timestamp?: number }
     ): void;
 
-    /** Подписка на события DevTools */
-    subscribe(listener: DevToolsListener): () => void;
+    subscribe(listener: (event: DevToolsEvent) => void): () => void;
 
-    /** Экспорт событий для панели */
     getEvents(): DevToolsEvent[];
 
-    /** Подключить плагины (например history/persist) */
     setPlugins(plugins: Record<string, unknown>): void;
-
-    /** Получить подключенные плагины */
     getPlugins(): Record<string, unknown>;
 };
 
 /**
  * Исторически panel.html слушает source === 'qwiklytics-devtools'
- * Поэтому используем этот source как "app source".
+ * и пишет в source === 'qwiklytics-devtools-extension' :contentReference[oaicite:2]{index=2}
  */
-const DEVTOOLS_SOURCE_APP = 'qwiklytics-devtools';
-const DEVTOOLS_SOURCE_EXTENSION = 'qwiklytics-devtools-extension';
+export const DEVTOOLS_SOURCE_APP = 'qwiklytics-devtools';
+export const DEVTOOLS_SOURCE_EXTENSION = 'qwiklytics-devtools-extension';
 
 /** Простая генерация id без зависимостей */
 function createId() {
@@ -76,13 +81,12 @@ function resolveHistoryApi(plugins: Record<string, unknown>): AnyHistoryApi | nu
 /**
  * Синглтон DevTools. Имеет небольшой event-bus и мост в расширение.
  */
-class QwiklyticsDevToolsImpl {
+class DevToolsCore {
     private readonly events: DevToolsEvent[] = [];
-    private readonly listeners = new Set<DevToolsListener>();
+    private readonly listeners = new Set<(event: DevToolsEvent) => void>();
 
     private plugins: Record<string, unknown> = {};
 
-    /** Ограничиваем буфер, чтобы не раздувать память */
     private readonly maxEvents = 500;
 
     private connected = false;
@@ -92,7 +96,6 @@ class QwiklyticsDevToolsImpl {
         if (!isBrowser() || this.isSetup) return;
         this.isSetup = true;
 
-        // Слушаем сообщения от панели расширения
         window.addEventListener('message', event => {
             const data = event.data as any;
             if (!data || data.source !== DEVTOOLS_SOURCE_EXTENSION) return;
@@ -109,9 +112,7 @@ class QwiklyticsDevToolsImpl {
         });
     }
 
-    push(
-        event: Omit<DevToolsEvent, 'id' | 'timestamp'> & { timestamp?: number }
-    ) {
+    push(event: Omit<DevToolsEvent, 'id' | 'timestamp'> & { timestamp?: number }) {
         const next: DevToolsEvent = {
             id: createId(),
             type: event.type,
@@ -126,16 +127,17 @@ class QwiklyticsDevToolsImpl {
 
         this.listeners.forEach(listener => listener(next));
 
-        // Если подключена панель — стримим события
         if (this.connected && isBrowser()) {
-            window.postMessage(
-                { source: DEVTOOLS_SOURCE_APP, type: 'EVENT', event: next },
-                '*'
-            );
+            const msg: DevToolsEventMessage = {
+                source: DEVTOOLS_SOURCE_APP,
+                type: 'EVENT',
+                event: next,
+            };
+            window.postMessage(msg, '*');
         }
     }
 
-    subscribe(listener: DevToolsListener) {
+    subscribe(listener: (event: DevToolsEvent) => void) {
         this.listeners.add(listener);
         return () => this.listeners.delete(listener);
     }
@@ -150,9 +152,9 @@ class QwiklyticsDevToolsImpl {
     }
 
     /**
-     * Devtools ↔ plugins:
-     * сюда передаются подключённые плагины (например historyPlugin или historyPlugin.api).
-     * После установки — панель получит INIT с plugins.
+     * DevTools ↔ plugins:
+     * передаём сюда подключённые плагины (например historyPlugin или historyPlugin.api).
+     * Панель получит INIT с plugins.
      */
     setPlugins(plugins: Record<string, unknown>) {
         this.plugins = { ...plugins };
@@ -169,22 +171,19 @@ class QwiklyticsDevToolsImpl {
     private postInit() {
         if (!this.connected || !isBrowser()) return;
 
-        window.postMessage(
-            {
-                source: DEVTOOLS_SOURCE_APP,
-                type: 'INIT',
-                events: this.events,
-                plugins: this.plugins,
-            },
-            '*'
-        );
+        const msg: DevToolsInitMessage = {
+            source: DEVTOOLS_SOURCE_APP,
+            type: 'INIT',
+            events: this.events,
+            plugins: this.plugins,
+        };
+
+        window.postMessage(msg, '*');
     }
 
     private handleDispatch(payload: DevToolsDispatchPayload) {
-        // Логируем команду панели
         this.push({ type: 'DEVTOOLS/DISPATCH', payload });
 
-        // Backward-compat: CLEAR → CLEAR_EVENTS
         if (payload.type === 'CLEAR' || payload.type === 'CLEAR_EVENTS') {
             this.clearEvents();
             return;
@@ -198,50 +197,44 @@ class QwiklyticsDevToolsImpl {
     }
 }
 
-const impl = new QwiklyticsDevToolsImpl();
+const core = new DevToolsCore();
 
-/**
- * Публичный экспорт: devTools
- */
 export const devTools: DevToolsGlobal = {
     push(event) {
-        impl.setup();
-        impl.push(event);
+        core.setup();
+        core.push(event);
     },
     subscribe(listener) {
-        impl.setup();
-        return impl.subscribe(listener);
+        core.setup();
+        return core.subscribe(listener);
     },
     getEvents() {
-        impl.setup();
-        return impl.getEvents();
+        core.setup();
+        return core.getEvents();
     },
     setPlugins(plugins) {
-        impl.setup();
-        impl.setPlugins(plugins);
+        core.setup();
+        core.setPlugins(plugins);
     },
     getPlugins() {
-        impl.setup();
-        return impl.getPlugins();
+        core.setup();
+        return core.getPlugins();
     },
 };
 
 /**
- * Включение devtools и экспорт в window для панели.
+ * Включение devtools и экспорт в window для panel scripts.
  */
 export function enableQwiklyticsDevTools() {
     if (!isBrowser()) return devTools;
 
-    impl.setup();
+    core.setup();
 
-    // Экспортируем в window для panel scripts (history-panel и др.)
+    // Экспортируем в window для панелей
     (window as any).__QWIKLYTICS_DEVTOOLS__ = devTools;
 
-    // Handshake в сторону расширения (если оно есть)
-    window.postMessage(
-        { source: DEVTOOLS_SOURCE_APP, type: 'HANDSHAKE' },
-        '*'
-    );
+    // Пробуем установить связь с панелью/расширением
+    window.postMessage({ source: DEVTOOLS_SOURCE_APP, type: 'HANDSHAKE' }, '*');
 
     return devTools;
 }
