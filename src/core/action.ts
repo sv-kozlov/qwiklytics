@@ -1,29 +1,27 @@
 /**
- * Action — описание действия без внутреннего состояния
+ * Action — описание синхронного действия.
+ * Не хранит внутреннее состояние.
  */
 export interface Action<P = unknown> {
     readonly type: string;
-    execute: (payload: P) => void;
+    execute(payload: P): void;
 }
 
 /**
- * Контекст для middleware
+ * Контекст, передаваемый в middleware
  */
-export interface ActionContext<P> {
+export interface ActionContext<P = unknown> {
     type: string;
     payload: P;
 }
 
 /**
- * Создание действия для изменения состояния
- * @param type - уникальный тип действия
- * @param executor - функция выполнения действия
- * @param middlewares
+ * Создание action
  */
 export function createAction<P>(
     type: string,
     executor: (payload: P) => void,
-    middlewares?: readonly any[]
+    middlewares: readonly Middleware<any>[] = []
 ): Action<P> {
     return {
         type,
@@ -31,22 +29,37 @@ export function createAction<P>(
         execute(payload: P) {
             const context: ActionContext<P> = { type, payload };
 
-            // Middleware: before action
-            middlewares?.forEach(mw => {
-                mw.onAction?.(context);
-            });
+            // Вызываем middleware ДО выполнения reducer
+            middlewares.forEach(mw => mw.onAction?.(context));
 
             executor(payload);
 
-            // DevTools
-            if (typeof window !== 'undefined' && (window as any).__QWIKLYTICS_DEVTOOLS__) {
-                (window as any).__QWIKLYTICS_DEVTOOLS__.dispatch({
-                    type: 'ACTION_DISPATCHED',
-                    actionType: type,
-                    payload,
-                    timestamp: Date.now(),
-                });
-            }
+            dispatchDevTools('ACTION_DISPATCHED', {
+                actionType: type,
+                payload,
+            });
         },
     };
 }
+
+/* ================= DevTools ================= */
+
+type DevToolsPayload = Record<string, unknown>;
+
+function dispatchDevTools(
+    type: string,
+    payload: DevToolsPayload = {}
+) {
+    if (typeof window === 'undefined') return;
+
+    (window as any).__QWIKLYTICS_DEVTOOLS__?.dispatch({
+        type,
+        ...payload,
+        timestamp: Date.now(),
+    });
+}
+
+
+/* ================= Types ================= */
+
+import type { Middleware } from './middleware';

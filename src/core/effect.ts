@@ -1,6 +1,6 @@
 /**
- * Асинхронный эффект (stateless)
- * Не хранит внутреннее состояние — безопасен для параллельных вызовов
+ * Асинхронный эффект (stateless).
+ * Можно безопасно вызывать параллельно.
  */
 export interface Effect<P = unknown, R = unknown> {
     readonly type: string;
@@ -18,10 +18,7 @@ export function createEffect<P, R>(
         type,
 
         async execute(payload: P): Promise<R> {
-            dispatchDevTools('EFFECT_STARTED', {
-                effectType: type,
-                payload,
-            });
+            dispatchDevTools('EFFECT_STARTED', { effectType: type, payload });
 
             try {
                 const result = await executor(payload);
@@ -37,20 +34,16 @@ export function createEffect<P, R>(
                     effectType: type,
                     error: normalizeError(error),
                 });
-
                 throw error;
             } finally {
-                dispatchDevTools('EFFECT_FINALIZED', {
-                    effectType: type,
-                });
+                dispatchDevTools('EFFECT_FINALIZED', { effectType: type });
             }
         },
     };
 }
 
-/**
- * Приведение ошибки к безопасному формату
- */
+/* ================= Utils ================= */
+
 function normalizeError(error: unknown) {
     if (error instanceof Error) {
         return { message: error.message, stack: error.stack };
@@ -58,13 +51,15 @@ function normalizeError(error: unknown) {
     return { message: String(error) };
 }
 
-/**
- * Безопасная отправка событий в DevTools
- */
-function dispatchDevTools(type: string, payload: any) {
+type DevToolsPayload = Record<string, unknown>;
+
+function dispatchDevTools(
+    type: string,
+    payload: DevToolsPayload = {}
+) {
     if (typeof window === 'undefined') return;
-    const devtools = (window as any).__QWIKLYTICS_DEVTOOLS__;
-    devtools?.dispatch({
+
+    (window as any).__QWIKLYTICS_DEVTOOLS__?.dispatch({
         type,
         ...payload,
         timestamp: Date.now(),

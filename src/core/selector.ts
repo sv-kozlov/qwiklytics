@@ -1,5 +1,5 @@
 /**
- * Селектор с мемоизацией по ссылке состояния
+ * Selector — чистая функция derived-state
  */
 export interface Selector<T, R> {
     (state: T): R;
@@ -12,18 +12,18 @@ export interface SelectorOptions {
 }
 
 /**
- * Создание селектора
+ * Создание селектора с мемоизацией по ссылке state
  */
 export function createSelector<T, R>(
     selectorFn: (state: T) => R,
-    options: SelectorOptions = { memoize: true }
+    { memoize = true }: SelectorOptions = {}
 ): Selector<T, R> {
     let lastState: T | undefined;
     let lastResult: R;
     let recomputations = 0;
 
     const selector = ((state: T) => {
-        if (options.memoize && state === lastState) {
+        if (memoize && state === lastState) {
             return lastResult;
         }
 
