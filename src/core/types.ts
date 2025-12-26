@@ -11,9 +11,14 @@ export type ActionMap = Record<string, any>;
 export type EffectMap = Record<string, (payload: any) => Promise<any>>;
 
 /**
- * Map селекторов
+ * Map селекторов: key → возвращаемый тип селектора
+ *
+ * Пример:
+ * type Selectors = { doubled: number; label: string };
+ * selectors: { doubled: (s) => s.count * 2, label: (s) => `#${s.count}` }
  */
-export type SelectorMap<T> = Record<string, (state: T) => any>;
+export type SelectorMap<T> = Record<string, any>;
+
 
 /**
  * Reducer действия

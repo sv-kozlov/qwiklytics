@@ -160,7 +160,7 @@ export function createStoreContext<
     E extends EffectMap,
     S extends SelectorMap<T>
 >(storeConfig: StoreConfig<T, A, E, S>) {
-    const cacheKey = `qwiklytics:${storeConfig.name}`;
+    const cacheKey = toQwikContextName(storeConfig.name);
     const cached = contextCache.get(cacheKey);
 
     if (cached) {
@@ -177,8 +177,13 @@ export function createStoreContext<
         };
     }
 
+    function toQwikContextName(name: string) {
+        // Qwik: только A-Z a-z 0-9 _
+        return `qwiklytics_${name.replace(/[^A-Za-z0-9_]/g, '_')}`;
+    }
+
     const StoreContext = createContextId<Store<T, A, E, S>>(
-        `qwiklytics:${storeConfig.name}`
+        toQwikContextName(storeConfig.name)
     );
 
     /**

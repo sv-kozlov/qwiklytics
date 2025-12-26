@@ -1,0 +1,15 @@
+{
+  "name": "qwiklytics-qwik-basic",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite"
+  },
+  "dependencies": {
+    "@builder.io/qwik": "^1.5.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "typescript": "^5.4.0"
+  }
+}

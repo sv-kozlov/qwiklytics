@@ -36,7 +36,8 @@
     "dev": "tsc -w",
     "test": "vitest",
     "lint": "eslint src",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "example:basic": "tsx examples/basic/index.ts"
   },
   "keywords": [
     "qwik",
@@ -59,7 +60,8 @@
     "eslint": "^8.0.0",
     "rollup": "^4.0.0",
     "typescript": "^5.0.0",
-    "vitest": "^1.0.0"
+    "vitest": "^1.0.0",
+    "tsx": "^4.19.0"
   },
   "dependencies": {
     "@rollup/plugin-replace": "^6.0.3",
