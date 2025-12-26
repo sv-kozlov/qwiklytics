@@ -1,108 +1,100 @@
 import { Draft, produce } from 'immer';
-import { Action, createAction } from './action';
+import { createAction } from './action';
 import { createSelector, Selector } from './selector';
-import { Middleware } from './middleware';
+import type { ActionMap, EffectMap, SelectorMap } from './types';
 
 /**
- * Контекст для эффектов
+ * Основной Store
  */
-export interface StoreContext<T> {
-    getState(): T;
-    dispatch<P>(action: Action<P>, payload: P): void;
-}
-
-/**
- * Store — владелец состояния
- */
-export class Store<T, A extends Record<string, any>, S> {
+export class Store<
+    T,
+    A extends ActionMap,
+    E extends EffectMap,
+    S extends SelectorMap<T>
+> {
     private state: T;
-    private readonly listeners = new Set<(state: T) => void>();
-    private readonly actions = new Map<string, Action<any>>();
-    private readonly selectors = new Map<string, Selector<T, any>>();
+
+    private actions = new Map<keyof A, any>();
+    private effects = new Map<keyof E, any>();
+    private selectors = new Map<keyof S, Selector<T, any>>();
+    private listeners = new Set<(state: T) => void>();
 
     constructor(
         private readonly config: {
             name: string;
             initialState: T;
+
             actions: {
-                [K in keyof A]: (state: Draft<T>, payload: any) => void;
+                [K in keyof A]: (state: Draft<T>, payload: A[K]) => void;
             };
+
+            effects?: E;
+
             selectors?: {
                 [K in keyof S]: (state: T) => S[K];
             };
-            middlewares?: readonly Middleware<T>[];
         }
     ) {
         this.state = config.initialState;
 
         this.initActions();
+        this.initEffects();
         this.initSelectors();
     }
 
-    /* ============== init ============== */
-
+    /**
+     * Инициализация actions
+     */
     private initActions() {
-        const middlewares = this.config.middlewares ?? [];
+        const { actions, name } = this.config;
 
-        Object.entries(this.config.actions).forEach(([key, reducer]) => {
-            const action = createAction(
-                `${this.config.name}/${key}`,
-                payload => {
-                    const nextState = produce(this.state, draft => {
+        (Object.keys(actions) as Array<keyof A>).forEach(key => {
+            const reducer = actions[key];
+
+            this.actions.set(
+                key,
+                createAction<A[typeof key]>(`${name}/${String(key)}`, (payload: A[typeof key]) => {
+                    const next = produce(this.state, draft => {
                         reducer(draft, payload);
                     });
-
-                    this.applyState(nextState);
-                },
-                middlewares
+                    this.setState(next);
+                })
             );
-
-            this.actions.set(key, action);
         });
     }
 
+    /**
+     * Инициализация effects
+     */
+    private initEffects() {
+        if (!this.config.effects) return;
+
+        (Object.keys(this.config.effects) as Array<keyof E>).forEach(key => {
+            this.effects.set(key, this.config.effects![key]);
+        });
+    }
+
+    /**
+     * Инициализация selectors
+     */
     private initSelectors() {
         if (!this.config.selectors) return;
 
-        for (const key in this.config.selectors) {
+        (Object.keys(this.config.selectors) as Array<keyof S>).forEach(key => {
             this.selectors.set(
                 key,
-                createSelector(this.config.selectors[key])
+                createSelector(this.config.selectors![key])
             );
-        }
+        });
     }
 
-    /* ============== state ============== */
-
-    private applyState(nextState: T) {
-        const prevState = this.state;
-        const finalState = (this.config.middlewares ?? []).reduce(
-            (state, mw) => (mw.process ? mw.process(prevState, state) : state),
-            nextState
-        );
-
-        this.state = finalState;
+    private setState(state: T) {
+        this.state = state;
         this.listeners.forEach(l => l(this.state));
     }
 
-    /* ============== public API ============== */
-
-    getState = () => this.state;
-
-    dispatch<P>(action: Action<P>, payload: P) {
-        action.execute(payload);
-    }
-
-    getAction<K extends keyof A>(key: K): A[K] {
-        const action = this.actions.get(String(key));
-        if (!action) throw new Error(`Action "${String(key)}" not found`);
-        return action.execute as A[K];
-    }
-
-    getSelector<K extends keyof S>(key: K): () => S[K] {
-        const selector = this.selectors.get(String(key));
-        if (!selector) throw new Error(`Selector "${String(key)}" not found`);
-        return () => selector(this.state);
+    getState(): T {
+        return this.state;
     }
 
     subscribe(listener: (state: T) => void) {
@@ -110,14 +102,18 @@ export class Store<T, A extends Record<string, any>, S> {
         return () => this.listeners.delete(listener);
     }
 
-    hydrate(state: T) {
-        this.state = state;
-        this.listeners.forEach(l => l(this.state));
+    /** ===== PUBLIC API ===== */
+
+    getAction<K extends keyof A>(key: K): (payload: A[K]) => void {
+        return this.actions.get(key)!.execute;
     }
 
-    destroy() {
-        this.listeners.clear();
-        this.actions.clear();
-        this.selectors.clear();
+    getEffect<K extends keyof E>(key: K): E[K] {
+        return this.effects.get(key);
+    }
+
+    getSelector<K extends keyof S>(key: K): () => S[K] {
+        const selector = this.selectors.get(key)!;
+        return () => selector(this.state);
     }
 }

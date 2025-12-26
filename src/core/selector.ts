@@ -1,36 +1,30 @@
 /**
- * Selector — чистая функция derived-state
+ * Селектор с мемоизацией по ссылке состояния
  */
 export interface Selector<T, R> {
     (state: T): R;
     readonly recomputations: number;
-    resetRecomputations(): void;
-}
-
-export interface SelectorOptions {
-    memoize?: boolean;
+    reset(): void;
 }
 
 /**
- * Создание селектора с мемоизацией по ссылке state
+ * Создание селектора
  */
 export function createSelector<T, R>(
-    selectorFn: (state: T) => R,
-    { memoize = true }: SelectorOptions = {}
+    fn: (state: T) => R
 ): Selector<T, R> {
     let lastState: T | undefined;
     let lastResult: R;
     let recomputations = 0;
 
     const selector = ((state: T) => {
-        if (memoize && state === lastState) {
+        if (state === lastState) {
             return lastResult;
         }
 
         recomputations++;
         lastState = state;
-        lastResult = selectorFn(state);
-
+        lastResult = fn(state);
         return lastResult;
     }) as Selector<T, R>;
 
@@ -38,7 +32,7 @@ export function createSelector<T, R>(
         get: () => recomputations,
     });
 
-    selector.resetRecomputations = () => {
+    selector.reset = () => {
         recomputations = 0;
         lastState = undefined;
     };

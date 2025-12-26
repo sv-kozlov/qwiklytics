@@ -1,16 +1,15 @@
 /**
- * Action — описание синхронного действия.
- * Не хранит внутреннее состояние.
+ * Action — описание действия без внутреннего состояния
  */
-export interface Action<P = unknown> {
+export interface Action<P> {
     readonly type: string;
     execute(payload: P): void;
 }
 
 /**
- * Контекст, передаваемый в middleware
+ * Контекст middleware
  */
-export interface ActionContext<P = unknown> {
+export interface ActionContext<P> {
     type: string;
     payload: P;
 }
@@ -21,45 +20,18 @@ export interface ActionContext<P = unknown> {
 export function createAction<P>(
     type: string,
     executor: (payload: P) => void,
-    middlewares: readonly Middleware<any>[] = []
+    middlewares: {
+        onAction?<T>(ctx: ActionContext<T>): void;
+    }[] = []
 ): Action<P> {
     return {
         type,
 
-        execute(payload: P) {
-            const context: ActionContext<P> = { type, payload };
+        execute(payload) {
+            const ctx: ActionContext<P> = { type, payload };
 
-            // Вызываем middleware ДО выполнения reducer
-            middlewares.forEach(mw => mw.onAction?.(context));
-
+            middlewares.forEach(mw => mw.onAction?.(ctx));
             executor(payload);
-
-            dispatchDevTools('ACTION_DISPATCHED', {
-                actionType: type,
-                payload,
-            });
         },
     };
 }
-
-/* ================= DevTools ================= */
-
-type DevToolsPayload = Record<string, unknown>;
-
-function dispatchDevTools(
-    type: string,
-    payload: DevToolsPayload = {}
-) {
-    if (typeof window === 'undefined') return;
-
-    (window as any).__QWIKLYTICS_DEVTOOLS__?.dispatch({
-        type,
-        ...payload,
-        timestamp: Date.now(),
-    });
-}
-
-
-/* ================= Types ================= */
-
-import type { Middleware } from './middleware';
