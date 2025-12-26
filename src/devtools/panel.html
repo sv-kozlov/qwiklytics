@@ -2,97 +2,165 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <style>
-    .event-list { 
-      font-family: monospace; 
-      max-height: 400px; 
-      overflow-y: auto;
-    }
-    .event { 
-      padding: 4px; 
-      border-bottom: 1px solid #ccc;
-    }
-    .event-type { 
-      font-weight: bold; 
-      color: #007acc;
-    }
-  </style>
+    <meta charset="utf-8"/>
+    <style>
+        .event-list {
+            font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 6px;
+        }
+
+        .event {
+            padding: 6px 4px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .event:last-child {
+            border-bottom: none;
+        }
+
+        .event-type {
+            font-weight: bold;
+            color: #007acc;
+            margin-right: 8px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+            margin: 10px 0;
+        }
+
+        pre {
+            margin: 6px 0 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+    </style>
 </head>
 <body>
-  <div id="app">
+<div id="app">
     <h3>Qwiklytics DevTools</h3>
+
+    <div class="controls">
+        <button id="clear">Clear</button>
+        <button id="export">Export</button>
+    </div>
+
     <div id="event-list" class="event-list"></div>
-    <button id="clear">Clear</button>
-    <button id="export">Export</button>
-  </div>
-  
-  <script>
+</div>
+
+<script>
     class DevToolsPanel {
-      constructor() {
-        this.setupConnection();
-        this.bindEvents();
-      }
-      
-      setupConnection() {
-        window.addEventListener('message', (event) => {
-          if (event.data.source === 'qwiklytics-devtools') {
-            this.handleMessage(event.data);
-          }
-        });
-        
-        // Отправляем handshake
-        window.postMessage({
-          source: 'qwiklytics-devtools-extension',
-          type: 'HANDSHAKE',
-        }, '*');
-      }
-      
-      handleMessage(data) {
-        switch (data.type) {
-          case 'INIT':
-            this.renderEvents(data.events);
-            break;
-          case 'EVENT':
-            this.addEvent(data.event);
-            break;
+        constructor() {
+            this.events = [];
+            this.setupConnection();
+            this.bindEvents();
         }
-      }
-      
-      renderEvents(events) {
-        const container = document.getElementById('event-list');
-        container.innerHTML = '';
-        events.forEach(event => this.addEvent(event));
-      }
-      
-      addEvent(event) {
-        const container = document.getElementById('event-list');
-        const div = document.createElement('div');
-        div.className = 'event';
-        div.innerHTML = `
-          <span class="event-type">${event.type}</span>
-          <span>${new Date(event.timestamp).toLocaleTimeString()}</span>
-          <pre>${JSON.stringify(event, null, 2)}</pre>
-        `;
-        container.appendChild(div);
-        container.scrollTop = container.scrollHeight;
-      }
-      
-      bindEvents() {
-        document.getElementById('clear').addEventListener('click', () => {
-          window.postMessage({
-            source: 'qwiklytics-devtools-extension',
-            type: 'DISPATCH',
-            payload: { type: 'CLEAR' },
-          }, '*');
-        });
-        
-        document.getElementById('export').addEventListener('click', () => {
-          // Экспорт событий
-        });
-      }
+
+        setupConnection() {
+            window.addEventListener('message', (event) => {
+                const data = event.data;
+                if (!data || data.source !== 'qwiklytics-devtools') return;
+                this.handleMessage(data);
+            });
+
+            // Handshake
+            window.postMessage(
+                {
+                    source: 'qwiklytics-devtools-extension',
+                    type: 'HANDSHAKE',
+                },
+                '*'
+            );
+        }
+
+        handleMessage(data) {
+            switch (data.type) {
+                case 'INIT':
+                    this.events = Array.isArray(data.events) ? data.events : [];
+                    this.renderEvents(this.events);
+                    break;
+
+                case 'EVENT':
+                    if (data.event) {
+                        this.events.push(data.event);
+                        this.addEvent(data.event);
+                    }
+                    break;
+            }
+        }
+
+        renderEvents(events) {
+            const container = document.getElementById('event-list');
+            container.innerHTML = '';
+            events.forEach((evt) => this.addEvent(evt));
+        }
+
+        addEvent(event) {
+            const container = document.getElementById('event-list');
+
+            const row = document.createElement('div');
+            row.className = 'event';
+
+            const header = document.createElement('div');
+
+            const type = document.createElement('span');
+            type.className = 'event-type';
+            type.textContent = String(event.type ?? '(unknown)');
+
+            const time = document.createElement('span');
+            const ts = typeof event.timestamp === 'number' ? event.timestamp : Date.now();
+            time.textContent = new Date(ts).toLocaleTimeString();
+
+            header.appendChild(type);
+            header.appendChild(time);
+
+            const pre = document.createElement('pre');
+            pre.textContent = JSON.stringify(event, null, 2);
+
+            row.appendChild(header);
+            row.appendChild(pre);
+
+            container.appendChild(row);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        bindEvents() {
+            document.getElementById('clear').addEventListener('click', () => {
+                window.postMessage(
+                    {
+                        source: 'qwiklytics-devtools-extension',
+                        type: 'DISPATCH',
+                        payload: {type: 'CLEAR_EVENTS'},
+                    },
+                    '*'
+                );
+            });
+
+            document.getElementById('export').addEventListener('click', () => {
+                const data = JSON.stringify(
+                    {exportedAt: Date.now(), events: this.events},
+                    null,
+                    2
+                );
+
+                const blob = new Blob([data], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `qwiklytics-devtools-events-${Date.now()}.json`;
+                a.click();
+
+                URL.revokeObjectURL(url);
+            });
+        }
     }
-    
+
     new DevToolsPanel();
-  </script>
+</script>
 </body>
 </html>

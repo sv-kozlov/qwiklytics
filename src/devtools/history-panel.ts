@@ -1,165 +1,197 @@
+// src/devtools/history-panel.ts
+
+/**
+ * Историческая панель DevTools.
+ *
+ * Важно:
+ * - панель НЕ зависит от Qwik
+ * - ожидает глобальный window.__QWIKLYTICS_DEVTOOLS__
+ * - работает с новым HistoryAPI (undo/redo/clearHistory/getState/getEntries)
+ */
+
+type AnyHistoryApi = {
+    undo?: () => void;
+    redo?: () => void;
+    clearHistory?: () => void;
+    canUndo?: () => boolean;
+    canRedo?: () => boolean;
+    getState?: () => { past?: unknown[]; future?: unknown[] } | unknown;
+    getEntries?: (options?: { limit?: number }) => unknown[];
+};
+
+function getDevTools() {
+    return (window as any).__QWIKLYTICS_DEVTOOLS__ as
+        | {
+        subscribe: (listener: (event: any) => void) => () => void;
+        getPlugins: () => Record<string, unknown>;
+        push: (event: any) => void;
+    }
+        | undefined;
+}
+
+function getHistoryApi(): AnyHistoryApi | null {
+    const devTools = getDevTools();
+    const plugins = devTools?.getPlugins?.() ?? {};
+    const history = plugins['history'] as any;
+
+    // Поддерживаем два варианта:
+    // 1) plugins.history.api
+    // 2) plugins.history (если туда положили сразу api)
+    return (history?.api ?? history) ?? null;
+}
 
 export function createHistoryDevToolsPanel() {
-  return {
-    name: 'history',
-    
-    render() {
-      return `
+    return {
+        name: 'history',
+
+        render() {
+            return `
         <div class="history-panel">
           <h3>History (Undo/Redo)</h3>
+
           <div class="history-controls">
-            <button id="history-undo" disabled>Undo (0)</button>
-            <button id="history-redo" disabled>Redo (0)</button>
+            <button id="history-undo" disabled>Undo</button>
+            <button id="history-redo" disabled>Redo</button>
             <button id="history-clear">Clear</button>
           </div>
-          <div class="history-stats">
-            <div>Past: <span id="history-past-count">0</span></div>
-            <div>Future: <span id="history-future-count">0</span></div>
-            <div>Total: <span id="history-total-count">0</span></div>
-          </div>
-          <div class="history-list" id="history-entries">
-            <!-- Записи истории будут здесь -->
-          </div>
+
+          <div class="history-meta" id="history-meta"></div>
+
+          <div class="history-entries" id="history-entries"></div>
         </div>
       `;
-    },
-    
-    setup(element: HTMLElement) {
-      const updateUI = () => {
-        if (!(window as any).__QWIKLYTICS_HISTORY_API) return;
-        
-        const api = (window as any).__QWIKLYTICS_HISTORY_API;
-        const info = api.getHistoryInfo();
-        const entries = api.getHistoryEntries({ limit: 10 });
-        
-        // Обновляем кнопки
-        const undoBtn = element.querySelector('#history-undo') as HTMLButtonElement;
-        const redoBtn = element.querySelector('#history-redo') as HTMLButtonElement;
-        
-        undoBtn.disabled = !info.canUndo;
-        undoBtn.textContent = `Undo (${info.pastCount})`;
-        redoBtn.disabled = !info.canRedo;
-        redoBtn.textContent = `Redo (${info.futureCount})`;
-        
-        // Обновляем счетчики
-        element.querySelector('#history-past-count')!.textContent = info.pastCount.toString();
-        element.querySelector('#history-future-count')!.textContent = info.futureCount.toString();
-        element.querySelector('#history-total-count')!.textContent = info.totalActions.toString();
-        
-        // Обновляем список записей
-        const entriesContainer = element.querySelector('#history-entries')!;
-        entriesContainer.innerHTML = entries.entries.map(entry => `
-          <div class="history-entry" data-id="${entry.id}">
-            <div class="history-entry-action">${entry.action}</div>
-            <div class="history-entry-time">
-              ${new Date(entry.timestamp).toLocaleTimeString()}
-            </div>
-            <div class="history-entry-diff">
-              ${Object.keys(entry.diff || {}).length} changes
-            </div>
-            <button class="history-entry-jump">Jump</button>
-          </div>
-        `).join('');
-      };
-      
-      // Обработчики кнопок
-      element.querySelector('#history-undo')?.addEventListener('click', () => {
-        (window as any).__QWIKLYTICS_HISTORY_API?.undo();
-        updateUI();
-      });
-      
-      element.querySelector('#history-redo')?.addEventListener('click', () => {
-        (window as any).__QWIKLYTICS_HISTORY_API?.redo();
-        updateUI();
-      });
-      
-      element.querySelector('#history-clear')?.addEventListener('click', () => {
-        (window as any).__QWIKLYTICS_HISTORY_API?.clearHistory();
-        updateUI();
-      });
-      
-      // Подписываемся на события истории
-      if ((window as any).__QWIKLYTICS_DEVTOOLS__) {
-        (window as any).__QWIKLYTICS_DEVTOOLS__.subscribe((event: any) => {
-          if (event.type.includes('HISTORY')) {
+        },
+
+        init(container: HTMLElement) {
+            const undoBtn = container.querySelector<HTMLButtonElement>('#history-undo')!;
+            const redoBtn = container.querySelector<HTMLButtonElement>('#history-redo')!;
+            const clearBtn = container.querySelector<HTMLButtonElement>('#history-clear')!;
+            const meta = container.querySelector<HTMLDivElement>('#history-meta')!;
+            const entriesContainer = container.querySelector<HTMLDivElement>('#history-entries')!;
+
+            const updateUI = () => {
+                const api = getHistoryApi();
+
+                if (!api) {
+                    meta.textContent = 'History plugin not connected';
+                    undoBtn.disabled = true;
+                    redoBtn.disabled = true;
+                    entriesContainer.innerHTML = '';
+                    return;
+                }
+
+                const state = api.getState?.() as any;
+                const pastCount = Array.isArray(state?.past) ? state.past.length : 0;
+                const futureCount = Array.isArray(state?.future) ? state.future.length : 0;
+
+                const canUndo = api.canUndo?.() ?? pastCount > 0;
+                const canRedo = api.canRedo?.() ?? futureCount > 0;
+
+                undoBtn.disabled = !canUndo;
+                redoBtn.disabled = !canRedo;
+
+                undoBtn.textContent = `Undo (${pastCount})`;
+                redoBtn.textContent = `Redo (${futureCount})`;
+
+                meta.textContent = `past: ${pastCount} | future: ${futureCount}`;
+
+                const entries = api.getEntries?.({ limit: 50 }) ?? [];
+                entriesContainer.innerHTML = entries
+                    .map((entry: any) => {
+                        const action = String(entry?.action ?? '(unknown)');
+                        const ts = typeof entry?.timestamp === 'number' ? entry.timestamp : Date.now();
+                        return `
+                  <div class="history-entry">
+                    <div class="history-entry-action">${action}</div>
+                    <div class="history-entry-time">${new Date(ts).toLocaleTimeString()}</div>
+                  </div>
+                `;
+                    })
+                    .join('');
+            };
+
+            undoBtn.addEventListener('click', () => {
+                getHistoryApi()?.undo?.();
+                updateUI();
+            });
+
+            redoBtn.addEventListener('click', () => {
+                getHistoryApi()?.redo?.();
+                updateUI();
+            });
+
+            clearBtn.addEventListener('click', () => {
+                getHistoryApi()?.clearHistory?.();
+                updateUI();
+            });
+
+            // Обновляем UI на события devtools (и периодически — как fallback)
+            const devTools = getDevTools();
+            const unsub =
+                devTools?.subscribe?.((event: any) => {
+                    if (typeof event?.type === 'string' && event.type.includes('HISTORY')) {
+                        updateUI();
+                    }
+                }) ?? null;
+
+            const interval = window.setInterval(updateUI, 1000);
             updateUI();
-          }
-        });
-      }
-      
-      // Экспортируем API для DevTools
-      (window as any).__QWIKLYTICS_HISTORY_API = {
-        getHistoryInfo: () => (window as any).__QWIKLYTICS_HISTORY_STORE?.getHistoryInfo() || {},
-        undo: () => (window as any).__QWIKLYTICS_HISTORY_STORE?.undo(),
-        redo: () => (window as any).__QWIKLYTICS_HISTORY_STORE?.redo(),
-        clearHistory: () => (window as any).__QWIKLYTICS_HISTORY_STORE?.clearHistory(),
-        getHistoryEntries: (options: any) => 
-          (window as any).__QWIKLYTICS_HISTORY_STORE?.getHistoryEntries(options) || { entries: [] },
-      };
-      
-      // Обновляем UI каждую секунду
-      setInterval(updateUI, 1000);
-      updateUI();
-    },
-    
-    styles: `
+
+            return () => {
+                unsub?.();
+                window.clearInterval(interval);
+            };
+        },
+
+        styles: `
       .history-panel {
         padding: 10px;
         font-family: monospace;
         font-size: 12px;
       }
+
       .history-controls {
         display: flex;
-        gap: 5px;
-        margin-bottom: 10px;
+        gap: 6px;
+        margin-bottom: 8px;
       }
+
       .history-controls button {
-        padding: 5px 10px;
+        padding: 4px 8px;
         font-size: 12px;
       }
-      .history-stats {
-        display: flex;
-        gap: 15px;
-        margin-bottom: 10px;
-        padding: 5px;
-        background: #f5f5f5;
-        border-radius: 3px;
+
+      .history-meta {
+        margin-bottom: 8px;
+        color: #666;
       }
-      .history-list {
-        max-height: 300px;
-        overflow-y: auto;
+
+      .history-entries {
         border: 1px solid #ddd;
-        border-radius: 3px;
+        max-height: 260px;
+        overflow-y: auto;
+        padding: 6px;
       }
+
       .history-entry {
-        display: flex;
-        align-items: center;
-        padding: 5px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        padding: 4px 0;
         border-bottom: 1px solid #eee;
       }
-      .history-entry:hover {
-        background: #f9f9f9;
+
+      .history-entry:last-child {
+        border-bottom: none;
       }
+
       .history-entry-action {
-        flex: 1;
         font-weight: bold;
-        color: #007acc;
       }
+
       .history-entry-time {
-        width: 80px;
-        color: #666;
-        font-size: 11px;
-      }
-      .history-entry-diff {
-        width: 80px;
-        font-size: 11px;
         color: #888;
       }
-      .history-entry-jump {
-        padding: 2px 5px;
-        font-size: 11px;
-        margin-left: 5px;
-      }
     `,
-  };
+    };
 }
