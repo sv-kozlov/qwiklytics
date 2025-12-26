@@ -75,6 +75,7 @@ export function combineModules(modules: Record<string, any>) {
 
 // Обновляем src/index.ts для экспорта хуков
 export * from './qwik/hooks';
+export * from './hooks';
 
 // Добавляем в основной экспорт
 export {
