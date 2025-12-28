@@ -21,7 +21,7 @@ export function createAction<P>(
     type: string,
     executor: (payload: P) => void,
     middlewares: {
-        onAction?<T>(ctx: ActionContext<T>): void;
+        onAction?(ctx: ActionContext<P>): void;
     }[] = []
 ): Action<P> {
     return {

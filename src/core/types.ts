@@ -1,4 +1,4 @@
-import type {Draft} from 'immer';
+import type { Draft } from 'immer';
 
 /**
  * Map действий: key → payload
@@ -18,7 +18,4 @@ export type SelectorMap<T> = Record<string, (state: T) => any>;
 /**
  * Reducer действия
  */
-export type ActionReducer<T, P> = (
-    state: Draft<T>,
-    payload: P
-) => void;
+export type ActionReducer<T, P> = (state: Draft<T>, payload: P) => void;

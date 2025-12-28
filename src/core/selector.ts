@@ -13,18 +13,20 @@ export interface Selector<T, R> {
 export function createSelector<T, R>(
     fn: (state: T) => R
 ): Selector<T, R> {
-    let lastState: T | undefined;
-    let lastResult: R;
+    let hasCache = false;
+    let lastState!: T;
+    let lastResult!: R;
     let recomputations = 0;
 
     const selector = ((state: T) => {
-        if (state === lastState) {
+        if (hasCache && state === lastState) {
             return lastResult;
         }
 
         recomputations++;
         lastState = state;
         lastResult = fn(state);
+        hasCache = true;
         return lastResult;
     }) as Selector<T, R>;
 
@@ -33,8 +35,10 @@ export function createSelector<T, R>(
     });
 
     selector.reset = () => {
+        hasCache = false;
         recomputations = 0;
-        lastState = undefined;
+        lastState = undefined as unknown as T;
+        lastResult = undefined as unknown as R;
     };
 
     return selector;

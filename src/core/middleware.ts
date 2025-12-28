@@ -10,7 +10,7 @@ export interface MiddlewareContext<P = unknown> {
  * Middleware Store
  */
 export interface Middleware<T> {
-    onAction?<P>(action: MiddlewareContext<P>): void;
+    onAction?(action: MiddlewareContext<unknown>): void;
     process?(prevState: T, nextState: T): T;
 }
 
@@ -67,7 +67,7 @@ export const createThrottleMiddleware = <T>(delay: number): Middleware<T> => {
  */
 export const createFreezeMiddleware = <T>(): Middleware<T> => ({
     process(_, next) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (import.meta.env.DEV) {
             Object.freeze(next);
         }
         return next;

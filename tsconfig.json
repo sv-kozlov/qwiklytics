@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    /* Базовые настройки */
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+
+    /* JSX для Qwik */
+    "jsx": "react-jsx",
+    "jsxImportSource": "@builder.io/qwik",
+
+    /* Качество типов */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "useUnknownInCatchVariables": true,
+    "forceConsistentCasingInFileNames": true,
+
+    /* Удобство */
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "types": ["vite/client"],
+
+    /* Пути */
+    "baseUrl": "."
+  },
+  "include": ["src", "vite.config.ts"],
+  "exclude": ["dist", "node_modules"]
+}

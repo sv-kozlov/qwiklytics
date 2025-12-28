@@ -1,6 +1,10 @@
-import { Draft, produce } from 'immer';
+import { produce } from 'immer';
+import type { Draft } from 'immer';
+
+import type { Action } from './action';
 import { createAction } from './action';
-import { createSelector, Selector } from './selector';
+import { createSelector } from './selector';
+import type { Selector } from './selector';
 import type { ActionMap, EffectMap, SelectorMap } from './types';
 
 /**
@@ -12,12 +16,20 @@ export class Store<
     E extends EffectMap,
     S extends SelectorMap<T>
 > {
+    /** Текущее состояние стора */
     private state: T;
 
-    private actions = new Map<keyof A, any>();
-    private effects = new Map<keyof E, any>();
-    private selectors = new Map<keyof S, Selector<T, any>>();
-    private listeners = new Set<(state: T) => void>();
+    /** Зарегистрированные actions */
+    private readonly actions = new Map<keyof A, Action<A[keyof A]>>();
+
+    /** Зарегистрированные effects */
+    private readonly effects = new Map<keyof E, E[keyof E]>();
+
+    /** Зарегистрированные selectors */
+    private readonly selectors = new Map<keyof S, Selector<T, S[keyof S]>>();
+
+    /** Подписчики на изменение state */
+    private readonly listeners = new Set<(state: T) => void>();
 
     constructor(
         private readonly config: {
@@ -53,12 +65,16 @@ export class Store<
 
             this.actions.set(
                 key,
-                createAction<A[typeof key]>(`${name}/${String(key)}`, (payload: A[typeof key]) => {
-                    const next = produce(this.state, draft => {
-                        reducer(draft, payload);
-                    });
-                    this.setState(next);
-                })
+                createAction<A[typeof key]>(
+                    `${name}/${String(key)}`,
+                    (payload: A[typeof key]) => {
+                        const next = produce(this.state, draft => {
+                            reducer(draft, payload);
+                        });
+
+                        this.setState(next);
+                    }
+                )
             );
         });
     }
@@ -88,15 +104,24 @@ export class Store<
         });
     }
 
+    /**
+     * Централизованная установка state + уведомление подписчиков
+     */
     private setState(state: T) {
         this.state = state;
-        this.listeners.forEach(l => l(this.state));
+        this.listeners.forEach(listener => listener(this.state));
     }
 
+    /**
+     * Получить текущее состояние
+     */
     getState(): T {
         return this.state;
     }
 
+    /**
+     * Подписаться на изменения state
+     */
     subscribe(listener: (state: T) => void) {
         this.listeners.add(listener);
         return () => this.listeners.delete(listener);
@@ -104,16 +129,25 @@ export class Store<
 
     /** ===== PUBLIC API ===== */
 
+    /**
+     * Получить action по ключу
+     */
     getAction<K extends keyof A>(key: K): (payload: A[K]) => void {
         return this.actions.get(key)!.execute;
     }
 
+    /**
+     * Получить effect по ключу
+     */
     getEffect<K extends keyof E>(key: K): E[K] {
-        return this.effects.get(key);
+        return this.effects.get(key)! as E[K];
     }
 
+    /**
+     * Получить selector по ключу
+     */
     getSelector<K extends keyof S>(key: K): () => S[K] {
-        const selector = this.selectors.get(key)!;
+        const selector = this.selectors.get(key)! as Selector<T, S[K]>;
         return () => selector(this.state);
     }
 }
