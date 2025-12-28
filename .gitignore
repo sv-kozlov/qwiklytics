@@ -1,6 +1,19 @@
 /.idea/
-/node_modules/
+node_modules
 dist
 build
 coverage
 *.log
+
+# caches / build artifacts
+.vite/
+*.tsbuildinfo
+
+# env
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db

@@ -33,7 +33,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && rollup -c",
-    "dev": "tsc -w",
+    "dev": "tsc -w --noEmit",
+    "dev:bundle": "rollup -c -w",
     "test": "vitest",
     "lint": "eslint src",
     "prepublishOnly": "npm run build",
