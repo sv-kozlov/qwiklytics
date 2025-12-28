@@ -23,7 +23,7 @@ export default {
     input,
     output: [makeOutput('es'), makeOutput('cjs')],
     // Явно помечаем как external (peer deps / runtime deps)
-    external: ['@builder.io/qwik'],
+    external: ['@builder.io/qwik', 'immer'],
     plugins: [
         // Важно: node-resolve должен быть ДО replace
         resolve({

@@ -35,10 +35,10 @@
     "build": "tsc -p tsconfig.build.json && rollup -c",
     "dev": "tsc -w --noEmit",
     "dev:bundle": "rollup -c -w",
+    "example:basic": "tsx --tsconfig tsconfig.examples.json examples/basic/index.ts",
     "test": "vitest",
     "lint": "eslint src",
     "prepublishOnly": "npm run build",
-    "example:basic": "tsx examples/basic/index.ts"
   },
   "keywords": [
     "qwik",
@@ -57,15 +57,16 @@
   "devDependencies": {
     "@builder.io/qwik": "^1.0.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-replace": "^6.0.3",
     "@types/node": "^20.0.0",
     "eslint": "^8.0.0",
     "rollup": "^4.0.0",
     "typescript": "^5.0.0",
     "vitest": "^1.0.0",
-    "tsx": "^4.19.0"
+    "tsx": "^4.19.0",
+    "immer": "^10.0.0"
   },
   "dependencies": {
-    "@rollup/plugin-replace": "^6.0.3",
-    "immer": "^10.0.0"
+
   }
 }

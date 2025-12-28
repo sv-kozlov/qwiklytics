@@ -26,6 +26,6 @@
     /* Пути */
     "baseUrl": "."
   },
-  "include": ["src",  "examples", "vite.config.ts"],
-  "exclude": ["dist", "node_modules"]
+  "include": ["src", "vite.config.ts"],
+  "exclude": ["dist", "build", "node_modules", "examples"]
 }

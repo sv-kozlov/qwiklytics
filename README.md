@@ -1,3 +1,4 @@
+```
 qwiklytics/
 ├── src/                      # Исходный код библиотеки
 │   ├── core/                 # Ядро библиотеки
@@ -23,3 +24,4 @@ qwiklytics/
 ├── vite.config.ts            # Конфигурация Vite
 ├── rollup.config.js          # Конфигурация Rollup
 └── README.md                 # Основной README
+```
